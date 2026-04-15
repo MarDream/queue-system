@@ -1,0 +1,346 @@
+package com.queue.service.impl;
+
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.queue.common.BusinessException;
+import com.queue.common.ResultCode;
+import com.queue.dto.ActiveTicketResponse;
+import com.queue.dto.AdminTicketVO;
+import com.queue.dto.CancelTicketRequest;
+import com.queue.dto.MyTicketVO;
+import com.queue.dto.QueueStatusResponse;
+import com.queue.dto.TakeTicketRequest;
+import com.queue.dto.TakeTicketResponse;
+import com.queue.entity.BusinessType;
+import com.queue.entity.Counter;
+import com.queue.entity.Region;
+import com.queue.entity.RegionBusiness;
+import com.queue.entity.Ticket;
+import com.queue.enums.TicketSource;
+import com.queue.enums.TicketStatus;
+import com.queue.mapper.BusinessTypeMapper;
+import com.queue.mapper.CounterMapper;
+import com.queue.mapper.RegionBusinessMapper;
+import com.queue.mapper.RegionMapper;
+import com.queue.mapper.TicketMapper;
+import com.queue.service.QueueService;
+import com.queue.service.TicketService;
+import com.queue.util.PhoneUtil;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+@Service
+public class TicketServiceImpl implements TicketService {
+
+    private final TicketMapper ticketMapper;
+    private final BusinessTypeMapper businessTypeMapper;
+    private final CounterMapper counterMapper;
+    private final RegionMapper regionMapper;
+    private final RegionBusinessMapper regionBusinessMapper;
+    private final QueueService queueService;
+
+    public TicketServiceImpl(TicketMapper ticketMapper, BusinessTypeMapper businessTypeMapper, CounterMapper counterMapper, RegionMapper regionMapper, RegionBusinessMapper regionBusinessMapper, QueueService queueService) {
+        this.ticketMapper = ticketMapper;
+        this.businessTypeMapper = businessTypeMapper;
+        this.counterMapper = counterMapper;
+        this.regionMapper = regionMapper;
+        this.regionBusinessMapper = regionBusinessMapper;
+        this.queueService = queueService;
+    }
+
+    @Override
+    @Transactional
+    public TakeTicketResponse takeTicket(TakeTicketRequest request) {
+        // 1. Validate business type exists and is globally enabled
+        BusinessType bt = businessTypeMapper.selectById(request.getBusinessTypeId());
+        if (bt == null || bt.getIsEnabled() == null || !bt.getIsEnabled()) {
+            throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE);
+        }
+
+        // 如果没有传regionId，则从区域-业务关联中查找（使用第一个启用该业务的区域）
+        Long regionId = request.getRegionId();
+        if (regionId == null) {
+            List<RegionBusiness> rbList = regionBusinessMapper.selectList(
+                new QueryWrapper<RegionBusiness>()
+                    .eq("business_type_id", request.getBusinessTypeId())
+                    .eq("is_enabled", 1)
+                    .last("LIMIT 1")
+            );
+            if (!rbList.isEmpty()) {
+                regionId = rbList.get(0).getRegionId();
+            }
+        }
+
+        if (regionId == null) {
+            throw new BusinessException(50001, "该业务类型在当前区域不可用");
+        }
+
+        // 校验该区域是否启用了此业务类型
+        RegionBusiness rb = regionBusinessMapper.selectOne(
+            new QueryWrapper<RegionBusiness>()
+                .eq("region_id", regionId)
+                .eq("business_type_id", request.getBusinessTypeId())
+        );
+        if (rb == null || !Boolean.TRUE.equals(rb.getIsEnabled())) {
+            throw new BusinessException(50001, "该业务类型在当前区域未启用");
+        }
+
+        // 2. Check duplicate ticket with distributed lock
+        String maskedPhone = PhoneUtil.mask(request.getPhone());
+        String lockKey = "queue:lock:dup:" + regionId + ":" + request.getBusinessTypeId() + ":" + maskedPhone;
+        boolean locked = queueService.acquireLock(lockKey, 5);
+        if (!locked) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR);
+        }
+
+        String ticketNo = null;
+        Ticket ticket = null;
+        try {
+            List<Ticket> existing = ticketMapper.selectList(
+                new QueryWrapper<Ticket>()
+                    .eq("region_id", regionId)
+                    .eq("phone", maskedPhone)
+                    .eq("business_type_id", request.getBusinessTypeId())
+                    .in("status", TicketStatus.WAITING.getValue(), TicketStatus.CALLED.getValue(), TicketStatus.SERVING.getValue())
+                    .apply("DATE(created_at) = CURDATE()")
+            );
+            if (!existing.isEmpty()) {
+                throw new BusinessException(ResultCode.DUPLICATE_TICKET);
+            }
+
+            // 3. Generate sequence and ticket number
+            long seq = queueService.generateSequence(regionId, request.getBusinessTypeId());
+            ticketNo = bt.getPrefix() + String.format("%03d", seq);
+
+            // 4. Insert ticket with masked phone
+            ticket = new Ticket();
+            ticket.setRegionId(regionId);
+            ticket.setTicketNo(ticketNo);
+            ticket.setBusinessTypeId(request.getBusinessTypeId());
+            ticket.setSource(TicketSource.ONLINE.getValue());
+            ticket.setPhone(PhoneUtil.mask(request.getPhone()));
+            ticket.setName(request.getName());
+            ticket.setStatus(TicketStatus.WAITING.getValue());
+            ticket.setCreatedAt(LocalDateTime.now());
+            ticketMapper.insert(ticket);
+
+            // 5. Enqueue in Redis
+            queueService.enqueue(regionId, request.getBusinessTypeId(), ticket.getId());
+            queueService.incrementWaitingCount(regionId, request.getBusinessTypeId());
+        } finally {
+            queueService.releaseLock(lockKey);
+        }
+
+        // 6. Return response
+        long waitingCount = queueService.getWaitingCount(regionId, request.getBusinessTypeId());
+        int estimatedMinutes = (int)(waitingCount * 3);
+
+        TakeTicketResponse resp = new TakeTicketResponse();
+        resp.setTicketNo(ticketNo);
+        resp.setBusinessType(bt.getName());
+        resp.setWaitingCount((int) waitingCount);
+        resp.setEstimatedWaitMinutes(estimatedMinutes);
+        resp.setCreatedAt(ticket.getCreatedAt());
+        return resp;
+    }
+
+    @Override
+    public QueueStatusResponse getQueueStatus(String ticketNo) {
+        Ticket ticket = ticketMapper.selectOne(
+            new QueryWrapper<Ticket>().eq("ticket_no", ticketNo).last("LIMIT 1")
+        );
+        if (ticket == null) {
+            throw new BusinessException(ResultCode.TICKET_NOT_FOUND);
+        }
+
+        BusinessType bt = businessTypeMapper.selectById(ticket.getBusinessTypeId());
+
+        QueueStatusResponse resp = new QueueStatusResponse();
+        resp.setTicketNo(ticketNo);
+        resp.setStatus(ticket.getStatus());
+        resp.setBusinessType(bt != null ? bt.getName() : "");
+
+        if (TicketStatus.WAITING.getValue().equals(ticket.getStatus())) {
+            long waitingCount = queueService.getWaitingCount(ticket.getRegionId(), ticket.getBusinessTypeId());
+            resp.setWaitingCount((int) waitingCount);
+            resp.setEstimatedWaitMinutes((int)(waitingCount * 3));
+        }
+
+        if (ticket.getCounterId() != null) {
+            Counter counter = counterMapper.selectById(ticket.getCounterId());
+            resp.setCounterName(counter != null ? counter.getName() : null);
+        }
+
+        return resp;
+    }
+
+    @Override
+    @Transactional
+    public void cancelTicket(CancelTicketRequest request) {
+        Ticket ticket = ticketMapper.selectOne(
+            new QueryWrapper<Ticket>().eq("ticket_no", request.getTicketNo())
+        );
+        if (ticket == null) {
+            throw new BusinessException(ResultCode.TICKET_NOT_FOUND);
+        }
+        if (!TicketStatus.WAITING.getValue().equals(ticket.getStatus())) {
+            throw new BusinessException(ResultCode.INVALID_STATE_TRANSITION);
+        }
+
+        ticket.setStatus(TicketStatus.CANCELLED.getValue());
+        ticketMapper.updateById(ticket);
+
+        queueService.dequeue(ticket.getRegionId(), ticket.getBusinessTypeId(), ticket.getId());
+        queueService.decrementWaitingCount(ticket.getRegionId(), ticket.getBusinessTypeId());
+    }
+
+    @Override
+    public List<MyTicketVO> getMyTickets(String phone) {
+        String maskedPhone = PhoneUtil.mask(phone);
+        List<Ticket> tickets = ticketMapper.selectList(
+            new QueryWrapper<Ticket>()
+                .eq("phone", maskedPhone)
+                .orderByDesc("created_at")
+                .last("LIMIT 50")
+        );
+        return tickets.stream().map(t -> {
+            BusinessType bt = businessTypeMapper.selectById(t.getBusinessTypeId());
+            Counter counter = t.getCounterId() != null ? counterMapper.selectById(t.getCounterId()) : null;
+            MyTicketVO vo = new MyTicketVO();
+            vo.setTicketNo(t.getTicketNo());
+            vo.setStatus(t.getStatus());
+            vo.setStatusText(TicketStatus.fromValue(t.getStatus()).name());
+            vo.setBusinessType(bt != null ? bt.getName() : "");
+            vo.setCounterName(counter != null ? counter.getName() : null);
+            vo.setCreatedAt(t.getCreatedAt());
+            vo.setCalledAt(t.getCalledAt());
+            vo.setCompletedAt(t.getCompletedAt());
+            return vo;
+        }).toList();
+    }
+
+    @Override
+    public ActiveTicketResponse getActiveTicket(Long regionId, String phone) {
+        ActiveTicketResponse resp = new ActiveTicketResponse();
+        String maskedPhone = PhoneUtil.mask(phone);
+
+        // Query unfinished tickets in this region
+        List<Ticket> activeTickets = ticketMapper.selectList(
+            new QueryWrapper<Ticket>()
+                .eq("region_id", regionId)
+                .eq("phone", maskedPhone)
+                .in("status", TicketStatus.WAITING.getValue(), TicketStatus.CALLED.getValue(), TicketStatus.SERVING.getValue())
+                .orderByAsc("created_at")
+                .last("LIMIT 1")
+        );
+
+        // Get region info
+        Region region = regionMapper.selectById(regionId);
+        resp.setRegionId(region != null ? region.getId() : null);
+        resp.setRegionName(region != null ? region.getRegionName() : "");
+
+        if (activeTickets.isEmpty()) {
+            resp.setHasActive(false);
+            return resp;
+        }
+
+        Ticket ticket = activeTickets.get(0);
+        resp.setHasActive(true);
+        resp.setTicketNo(ticket.getTicketNo());
+        resp.setStatus(ticket.getStatus());
+        resp.setStatusText(TicketStatus.fromValue(ticket.getStatus()).getLabel());
+        resp.setCreatedAt(ticket.getCreatedAt() != null ? ticket.getCreatedAt().toString() : null);
+
+        BusinessType bt = businessTypeMapper.selectById(ticket.getBusinessTypeId());
+        resp.setBusinessTypeName(bt != null ? bt.getName() : "");
+
+        if (ticket.getCounterId() != null) {
+            Counter counter = counterMapper.selectById(ticket.getCounterId());
+            resp.setCounterName(counter != null ? counter.getName() : null);
+        }
+
+        if (TicketStatus.WAITING.getValue().equals(ticket.getStatus())) {
+            long waitingCount = queueService.getWaitingCount(ticket.getRegionId(), ticket.getBusinessTypeId());
+            resp.setWaitingCount((int) waitingCount);
+            resp.setEstimatedWaitMinutes((int) (waitingCount * 3));
+        } else {
+            resp.setWaitingCount(0);
+            resp.setEstimatedWaitMinutes(0);
+        }
+
+        return resp;
+    }
+
+    @Override
+    public List<AdminTicketVO> listTickets(String status, String date, String startDate, String endDate, String phone, String name, String ticketNo) {
+        return listTickets(status, date, startDate, endDate, phone, name, ticketNo, null);
+    }
+
+    public List<AdminTicketVO> listTickets(String status, String date, String startDate, String endDate, String phone, String name, String ticketNo, Set<Long> allowedRegionIds) {
+        QueryWrapper<Ticket> wrapper = new QueryWrapper<>();
+        wrapper.orderByDesc("created_at").last("LIMIT 200");
+        if (status != null && !status.isEmpty()) {
+            wrapper.eq("status", status);
+        }
+        if (date != null && !date.isEmpty()) {
+            wrapper.apply("DATE(created_at) = {0}", date);
+        } else if ((startDate == null || startDate.isEmpty()) && (endDate == null || endDate.isEmpty())) {
+            // 默认当天
+            wrapper.apply("DATE(created_at) = CURDATE()");
+        }
+        if (startDate != null && !startDate.isEmpty()) {
+            wrapper.ge("DATE(created_at)", startDate);
+        }
+        if (endDate != null && !endDate.isEmpty()) {
+            wrapper.le("DATE(created_at)", endDate);
+        }
+        if (phone != null && !phone.isEmpty()) {
+            wrapper.like("phone", phone);
+        }
+        if (name != null && !name.isEmpty()) {
+            wrapper.like("name", name);
+        }
+        if (ticketNo != null && !ticketNo.isEmpty()) {
+            wrapper.like("ticket_no", ticketNo);
+        }
+        List<Ticket> tickets = ticketMapper.selectList(wrapper);
+        // 区域权限过滤
+        if (allowedRegionIds != null && allowedRegionIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+        if (allowedRegionIds != null) {
+            Set<Long> filter = allowedRegionIds;
+            tickets = tickets.stream().filter(t -> t.getRegionId() != null && filter.contains(t.getRegionId())).collect(Collectors.toList());
+        }
+        return tickets.stream().map(t -> {
+            BusinessType bt = businessTypeMapper.selectById(t.getBusinessTypeId());
+            Counter counter = t.getCounterId() != null ? counterMapper.selectById(t.getCounterId()) : null;
+            // 通过 region_id 查询区域名称
+            String regionName = null;
+            if (t.getRegionId() != null) {
+                Region region = regionMapper.selectById(t.getRegionId());
+                regionName = region != null ? region.getRegionName() : null;
+            }
+            AdminTicketVO vo = new AdminTicketVO();
+            vo.setId(t.getId());
+            vo.setTicketNo(t.getTicketNo());
+            vo.setBusinessType(bt != null ? bt.getName() : "");
+            vo.setStatus(t.getStatus());
+            vo.setStatusText(TicketStatus.fromValue(t.getStatus()).name());
+            vo.setPhone(t.getPhone());
+            vo.setName(t.getName());
+            vo.setRegionName(regionName);
+            vo.setCounterName(counter != null ? counter.getName() : null);
+            vo.setCreatedAt(t.getCreatedAt());
+            vo.setCalledAt(t.getCalledAt());
+            vo.setServedAt(t.getServedAt());
+            vo.setCompletedAt(t.getCompletedAt());
+            return vo;
+        }).toList();
+    }
+}

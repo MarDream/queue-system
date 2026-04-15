@@ -1,0 +1,141 @@
+package com.queue.controller;
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.EncodeHintType;
+import com.google.zxing.client.j2se.MatrixToImageWriter;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.qrcode.QRCodeWriter;
+import com.queue.common.Result;
+import com.queue.entity.QrCodeRecord;
+import com.queue.entity.Region;
+import com.queue.entity.SysUser;
+import com.queue.mapper.RegionMapper;
+import com.queue.mapper.SysUserMapper;
+import com.queue.service.QrCodeRecordService;
+import com.queue.config.ServerConfig;
+import com.queue.service.RegionService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.*;
+
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.OutputStream;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Collectors;
+
+@RestController
+@RequestMapping("/api/v1/qrcode")
+@RequiredArgsConstructor
+public class QrCodeController {
+    private final RegionService regionService;
+    private final QrCodeRecordService qrCodeRecordService;
+    private final SysUserMapper sysUserMapper;
+    private final RegionMapper regionMapper;
+    private final ServerConfig serverConfig;
+
+    @GetMapping(value = "/generate", produces = MediaType.IMAGE_PNG_VALUE)
+    public void generate(
+            @RequestParam Long regionId,
+            @RequestParam(required = false) String baseUrl,
+            @RequestParam(defaultValue = "300") int size,
+            HttpServletResponse response) throws Exception {
+
+        String effectiveBaseUrl = (baseUrl != null && !baseUrl.isEmpty()) ? baseUrl : serverConfig.getFrontendBaseUrl();
+
+        Region region = regionService.getById(regionId);
+        if (region == null) {
+            response.sendError(404, "区域不存在");
+            return;
+        }
+
+        String url = effectiveBaseUrl + "/appointment?region=" + region.getRegionCode();
+
+        Map<EncodeHintType, Object> hints = new HashMap<>();
+        hints.put(EncodeHintType.CHARACTER_SET, "UTF-8");
+        hints.put(EncodeHintType.MARGIN, 2);
+
+        QRCodeWriter writer = new QRCodeWriter();
+        BitMatrix matrix = writer.encode(url, BarcodeFormat.QR_CODE, size, size, hints);
+
+        response.setContentType(MediaType.IMAGE_PNG_VALUE);
+        response.setHeader("Content-Disposition", "inline; filename=qrcode-" + region.getRegionCode() + ".png");
+
+        OutputStream out = response.getOutputStream();
+        MatrixToImageWriter.writeToStream(matrix, "PNG", out);
+        out.flush();
+    }
+
+    @GetMapping("/url")
+    public Result<Map<String, Object>> getUrl(
+            @RequestParam String regionCode,
+            @RequestParam(required = false) Long userId,
+            @RequestParam(required = false) String baseUrl) {
+        String effectiveBaseUrl = (baseUrl != null && !baseUrl.isEmpty()) ? baseUrl : serverConfig.getFrontendBaseUrl();
+        Region region = regionService.getByCode(regionCode);
+        if (region == null) {
+            return Result.error(400, "区域不存在");
+        }
+        // 权限校验
+        if (userId != null && userId > 0) {
+            SysUser user = sysUserMapper.selectById(userId);
+            if (user != null && !"SUPER_ADMIN".equals(user.getRole())) {
+                if (user.getRegionCode() == null || user.getRegionCode().isEmpty()) {
+                    return Result.error(403, "无权操作该区域");
+                }
+                Region userRegion = regionService.getByCode(user.getRegionCode());
+                if (userRegion == null) {
+                    return Result.error(403, "无权操作该区域");
+                }
+                List<Long> allowedRegionIds = regionService.getDescendantRegionIds(userRegion.getId());
+                if (!allowedRegionIds.contains(region.getId())) {
+                    return Result.error(403, "无权操作该区域");
+                }
+            }
+        }
+        String url = effectiveBaseUrl + "/appointment?region=" + region.getRegionCode();
+        QrCodeRecord record = qrCodeRecordService.saveOrUpdate(region.getId(), region.getRegionCode(), region.getRegionName(), url);
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("id", record.getId());
+        data.put("regionId", region.getId());
+        data.put("regionCode", region.getRegionCode());
+        data.put("regionName", region.getRegionName());
+        data.put("url", url);
+        return Result.ok(data);
+    }
+
+    @GetMapping("/list")
+    public Result<List<QrCodeRecord>> list(@RequestParam(required = false) Long userId) {
+        List<QrCodeRecord> allRecords = qrCodeRecordService.listAll();
+        if (userId == null || userId <= 0) {
+            return Result.ok(allRecords);
+        }
+        SysUser user = sysUserMapper.selectById(userId);
+        if (user == null || "SUPER_ADMIN".equals(user.getRole())) {
+            return Result.ok(allRecords);
+        }
+        if (user.getRegionCode() == null || user.getRegionCode().isEmpty()) {
+            return Result.ok(List.of());
+        }
+        Region userRegion = regionService.getByCode(user.getRegionCode());
+        if (userRegion == null) {
+            return Result.ok(List.of());
+        }
+        List<Long> allowedRegionIds = regionService.getDescendantRegionIds(userRegion.getId());
+        Set<Long> allowedSet = new HashSet<>(allowedRegionIds);
+        return Result.ok(allRecords.stream()
+            .filter(r -> allowedSet.contains(r.getRegionId()))
+            .collect(Collectors.toList()));
+    }
+
+    @DeleteMapping("/{id}")
+    public Result<Void> delete(@PathVariable Long id) {
+        qrCodeRecordService.delete(id);
+        return Result.ok();
+    }
+}
