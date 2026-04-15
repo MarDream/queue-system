@@ -1,0 +1,89 @@
+# 离线部署专用 docker-compose（使用预构建镜像，不需要源码）
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: queue-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-3edc$RFV}
+      MYSQL_DATABASE: queue_system
+      TZ: Asia/Shanghai
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - queue-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: queue-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    command: --requirepass ${REDIS_PASSWORD:-admin123}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-admin123}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - queue-net
+
+  backend:
+    image: docker-backend:latest
+    container_name: queue-backend
+    restart: unless-stopped
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/queue_system?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&useUnicode=true&allowPublicKeyRetrieval=true
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_ROOT_PASSWORD:-3edc$RFV}
+      - SPRING_REDIS_HOST=redis
+      - SPRING_REDIS_PORT=6379
+      - SPRING_REDIS_PASSWORD=${REDIS_PASSWORD:-admin123}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production-must-be-at-least-32-chars!}
+      - APP_IP=${APP_IP:-}
+      - APP_FRONTEND_PORT=${FRONTEND_PORT:-80}
+      - APP_CORS_ORIGINS=${APP_CORS_ORIGINS:-}
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./backend/config/application.yml:/app/config/application.yml:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - queue-net
+
+  frontend:
+    image: docker-frontend:latest
+    container_name: queue-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+    networks:
+      - queue-net
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  queue-net:
+    driver: bridge

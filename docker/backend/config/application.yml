@@ -1,0 +1,27 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+  uri-encoding: UTF-8
+  tomcat:
+    uri-encoding: UTF-8
+
+spring:
+  jackson:
+    default-property-inclusion: non_null
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+  http:
+    encoding:
+      enabled: true
+      charset: UTF-8
+      force: true
+      force-request: true
+      force-response: true
+
+app:
+  ip:                    # 部署时手动指定，留空则自动获取
+  frontend:
+    port: 80             # 生产环境前端通过 Nginx 80 端口访问
+  cors:
+    extra-origins:       # 额外的 CORS 允许源，逗号分隔，如: http://192.168.1.100,http://example.com

@@ -1,0 +1,37 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://mysql:3306/queue_system?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&useUnicode=true&allowPublicKeyRetrieval=true}
+    username: ${SPRING_DATASOURCE_USERNAME:root}
+    password: ${SPRING_DATASOURCE_PASSWORD:QueueSystem2024!}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  data:
+    redis:
+      host: ${SPRING_REDIS_HOST:redis}
+      port: ${SPRING_REDIS_PORT:6379}
+      password: ${SPRING_REDIS_PASSWORD:}
+      database: 0
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+queue:
+  config:
+    avg-service-minutes: 3
+    ticket-number-padding: 3
+
+jwt:
+  secret: ${JWT_SECRET:change-me-in-production-must-be-at-least-32-chars!}
+
+app:
+  ip: ${APP_IP:}
+  frontend:
+    port: ${APP_FRONTEND_PORT:80}
+  cors:
+    extra-origins: ${APP_CORS_ORIGINS:}

@@ -1,0 +1,40 @@
+# Dependencies
+**/node_modules/
+
+# IDE
+**/.idea/
+**/.vscode/
+*.iml
+*.iws
+*.ipr
+
+# Build output
+**/dist/
+**/target/
+*.class
+*.jar
+*.war
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+docker/.env
+**/application-dev.yml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Claude Code
+.claude/
+memory/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
