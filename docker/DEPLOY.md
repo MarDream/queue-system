@@ -24,7 +24,6 @@ docker/
 │   ├── Dockerfile
 │   ├── .dockerignore
 │   └── config/
-│       ├── application.yml
 │       └── application-prod.yml    # 生产配置模板，部署前手动填写密码
 ├── frontend/
 │   ├── Dockerfile
