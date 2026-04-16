@@ -1,193 +1,206 @@
-# 排队叫号系统 - Docker 部署手册
+# 排队叫号系统 - 公网云 Docker 部署手册
 
-## 1. 前置条件
+## 1. 适用场景
 
-- Docker 20.10+
-- Docker Compose V2（`docker compose` 命令）
-- 服务器至少 2GB 内存、10GB 磁盘空间
+本方案适用于以下环境：
+
+- 云服务器公网 IP：`43.155.249.87`
+- 操作系统：Linux
+- MySQL 和 Redis 已经在云服务器上通过 Docker 独立运行
+- 本次只部署前端和后端两个服务
+- 前端通过公网地址 `http://43.155.249.87` 访问
+
+镜像命名固定为：
+
+- 前端：`queue-frontend`
+- 后端：`queue-backend`
 
 ## 2. 目录结构
 
 ```
 docker/
-├── docker-compose.yml              # 服务编排
-├── .env                            # 环境变量（敏感配置，手动创建）
-├── .env.example                    # 环境变量模板
+├── docker-compose.standalone.yml   # 独立部署编排（推荐）
 ├── backend/
 │   ├── Dockerfile
 │   ├── .dockerignore
 │   └── config/
-│       ├── application.yml         # 外部挂载配置（可修改）
-│       └── application-prod.yml    # 生产默认配置（打入镜像）
+│       ├── application.yml
+│       └── application-prod.yml    # 生产配置模板，部署前手动填写密码
 ├── frontend/
 │   ├── Dockerfile
 │   └── .dockerignore
 ├── nginx/
-│   └── default.conf                # Nginx 配置（可修改）
-├── mysql/
-│   └── init/
-│       └── schema.sql              # 数据库初始化脚本
-└── DEPLOY.md                       # 本文件
+│   └── default.conf                # 前端 Nginx 配置
+└── DEPLOY.md
 ```
 
-## 3. 配置步骤
+## 3. 影响范围分析
 
-### 3.1 创建环境变量文件
+### 原代码设计意图
+- 前端通过 `queue-system-frontend/src/api/index.ts:4` 和 `queue-system-frontend/src/api/counter.js:3` 固定访问 `/api/v1`
+- 开发环境由 `queue-system-frontend/vite.config.js:37` 代理 `/api` 到本地后端
+- 后端通过 `queue-system-backend/src/main/resources/application.yml:10` 默认启用 `dev` 配置
+- 后端 `app.ip` 与 `app.frontend.port` 由 `queue-system-backend/src/main/java/com/queue/config/ServerConfig.java:19` 读取，影响二维码、回显地址与 CORS
+- JWT 密钥由 `queue-system-backend/src/main/java/com/queue/util/JwtUtil.java:18` 读取
+
+### 本次直接影响
+- `docker/backend/Dockerfile`
+- `docker/nginx/default.conf`
+- `docker/docker-compose.standalone.yml`
+- `docker/backend/config/application-prod.yml`
+- `docker/DEPLOY.md`
+
+### 间接影响
+- 前端公网访问改为 Nginx 承载静态资源并转发 `/api`
+- 后端生产环境将通过外部挂载配置连接宿主机上的 MySQL/Redis
+- 生产环境不再依赖 `.env` 注入数据库和 Redis 密码，而是改为挂载配置文件
+
+### 风险等级
+- 中风险
+
+### 风险说明
+1. `host.docker.internal` 依赖 `extra_hosts: host-gateway`，要求目标 Docker 版本支持该特性
+2. 若现有 MySQL/Redis 容器未映射到宿主机 `3306/6379`，后端将无法连接
+3. 若未填写 `application-prod.yml` 中的密码和 JWT 密钥，后端会启动失败或登录鉴权异常
+4. 当前 Nginx `server_name` 固定为 `43.155.249.87`，若后续改域名需同步调整
+
+## 4. 配置步骤
+
+### 4.1 修改后端生产配置
+
+编辑 `docker/backend/config/application-prod.yml`，至少填写以下字段：
+
+```yaml
+spring:
+  datasource:
+    password: 你的MySQLRoot密码
+  data:
+    redis:
+      password: 你的Redis密码
+
+jwt:
+  secret: 你自己的JWT密钥_至少32位
+```
+
+如宿主机端口不是默认值，还要同步修改：
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:mysql://host.docker.internal:3306/queue_system...
+  data:
+    redis:
+      host: host.docker.internal
+      port: 6379
+```
+
+### 4.2 检查前端 Nginx 配置
+
+`docker/nginx/default.conf` 已经配置：
+
+- 监听 `80`
+- `server_name 43.155.249.87`
+- `/api/` 代理到 `http://queue-backend:8080/api/`
+- `/` 使用 `try_files` 支持单页路由回退
+
+如果后续公网地址不是 `43.155.249.87`，需要同步修改 `server_name`。
+
+## 5. 云服务器打包与启动
+
+你要求实际打包动作在云服务器进行，因此建议把整个项目上传到云服务器后，在项目根目录执行。
+
+### 5.1 构建镜像
 
 ```bash
 cd docker
-cp .env.example .env
+docker compose -f docker-compose.standalone.yml build
 ```
 
-### 3.2 修改 .env
-
-必改项：
-```env
-# 数据库密码（务必修改）
-MYSQL_ROOT_PASSWORD=你的数据库密码
-
-# JWT 密钥（务必修改，至少 32 个字符）
-JWT_SECRET=你的JWT密钥
-
-# 应用 IP（必须设为服务器外部可达 IP 或域名）
-APP_IP=192.168.1.100
-```
-
-可选项：
-```env
-# 前端对外端口（默认 80）
-FRONTEND_PORT=80
-
-# CORS 额外允许源（如果有多个访问地址）
-APP_CORS_ORIGINS=http://queue.example.com,http://10.0.0.50
-```
-
-### 3.3 修改后端配置（可选）
-
-编辑 `backend/config/application.yml`，可修改：
-- `app.ip` — 应用 IP（也可通过 .env 的 APP_IP 设置）
-- `app.frontend.port` — 前端端口（默认 80）
-- `app.cors.extra-origins` — 额外 CORS 源
-
-### 3.4 修改 Nginx 配置（可选）
-
-编辑 `nginx/default.conf`，一般无需修改。如需添加 HTTPS，在此文件中配置 SSL 证书。
-
-## 4. 构建与启动
-
-### 4.1 首次构建并启动
+### 5.2 启动服务
 
 ```bash
 cd docker
-docker compose up -d --build
+docker compose -f docker-compose.standalone.yml up -d
 ```
 
-首次启动约需 3-5 分钟（Maven 下载依赖、npm 安装包、MySQL 初始化数据）。
-
-### 4.2 查看服务状态
+### 5.3 查看状态
 
 ```bash
-docker compose ps
+docker compose -f docker-compose.standalone.yml ps
 ```
 
-预期输出（全部 healthy/running）：
-```
-NAME             STATUS
-queue-mysql      Up (healthy)
-queue-redis      Up (healthy)
+预期至少看到：
+
+```text
 queue-backend    Up
 queue-frontend   Up
 ```
 
-### 4.3 查看日志
+### 5.4 查看日志
 
 ```bash
-# 所有服务日志
-docker compose logs -f
-
-# 仅后端日志
-docker compose logs -f backend
-
-# 仅 MySQL 初始化日志
-docker compose logs mysql
+docker compose -f docker-compose.standalone.yml logs -f backend
+docker compose -f docker-compose.standalone.yml logs -f frontend
 ```
 
-## 5. 验证
+## 6. 验证方法
 
-### 5.1 前端访问
+### 6.1 访问验证
 
-浏览器打开 `http://<APP_IP>` 或 `http://<APP_IP>:<FRONTEND_PORT>`，应看到登录页面。
+浏览器打开：
 
-### 5.2 登录测试
+```text
+http://43.155.249.87
+```
 
-默认管理员账号：
-- 用户名：`admin`
-- 密码：`admin123`
+应能正常打开前端页面。
 
-### 5.3 功能验证
+### 6.2 API 代理验证
 
-1. 登录后进入管理后台
-2. 检查区域管理、窗口管理、用户管理页面正常
-3. 取号页面正常取号
-4. 叫号大屏正常显示
+在浏览器开发者工具中检查前端请求：
 
-## 6. 常用运维命令
+- 请求路径应为 `/api/v1/...`
+- 由 Nginx 转发到 `queue-backend:8080`
+- 不应出现跨域错误
+
+### 6.3 后端连接验证
+
+检查后端日志确认：
+
+- 成功连接 MySQL
+- 成功连接 Redis
+- 生产配置已生效
+
+## 7. 常用命令
 
 ```bash
-# 停止所有服务
-docker compose down
+# 启动
+docker compose -f docker-compose.standalone.yml up -d
 
-# 停止并清除数据卷（重置数据库）
-docker compose down -v
+# 停止
+docker compose -f docker-compose.standalone.yml down
 
-# 重新构建某个服务
-docker compose up -d --build backend
+# 重建并启动
+docker compose -f docker-compose.standalone.yml up -d --build
 
-# 重启某个服务
-docker compose restart backend
+# 查看后端日志
+docker compose -f docker-compose.standalone.yml logs -f backend
 
-# 查看资源使用
-docker stats
-
-# 进入后端容器
-docker compose exec backend sh
-
-# 进入 MySQL 容器
-docker compose exec mysql mysql -u root -p queue_system
-
-# 备份数据库
-docker compose exec mysql mysqldump -u root -p queue_system > backup.sql
-
-# 恢复数据库
-docker compose exec -T mysql mysql -u root -p queue_system < backup.sql
+# 查看前端日志
+docker compose -f docker-compose.standalone.yml logs -f frontend
 ```
 
-## 7. 仅重建某个服务
+## 8. 推荐部署策略结论
 
-当只修改了后端代码时，无需重建全部：
+推荐直接使用：
 
-```bash
-docker compose up -d --build backend
-```
+- `docker/docker-compose.standalone.yml`
+- `docker/backend/config/application-prod.yml`
+- `docker/nginx/default.conf`
 
-仅修改了前端代码时：
+原因：
 
-```bash
-docker compose up -d --build frontend
-```
-
-修改了 Nginx 配置或 application.yml 时，无需重建，重启即可：
-
-```bash
-docker compose restart frontend   # Nginx 配置变更
-docker compose restart backend    # application.yml 变更
-```
-
-## 8. 注意事项
-
-1. **APP_IP 必须设置**：二维码生成、CORS、重定向等功能依赖此 IP，留空会导致这些功能异常
-2. **首次启动慢**：MySQL 需要初始化数据库和种子数据，约 30-60 秒，后续启动很快
-3. **数据持久化**：MySQL 和 Redis 数据存储在 Docker volumes 中，`docker compose down` 不会删除数据，`docker compose down -v` 才会
-4. **端口冲突**：如果 80 端口被占用，修改 `.env` 中的 `FRONTEND_PORT`
-5. **Google Fonts**：前端使用了 Google Fonts，内网环境需确保能访问或改为本地字体
-6. **密码安全**：`.env` 文件包含敏感信息，已通过 `.gitignore` 排除，不要提交到版本库
+1. 最符合你现在的云环境：MySQL/Redis 已存在，不重复编排
+2. 敏感信息不写死在镜像里，而是通过挂载外部配置文件提供
+3. 前端直接暴露公网 `80` 端口，公网 IP 可直接访问
+4. 保持前端 `/api/v1` 现有调用方式不变，改动最小
