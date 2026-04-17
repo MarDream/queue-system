@@ -15,11 +15,18 @@
 - 前端：`queue-frontend`
 - 后端：`queue-backend`
 
+镜像 tag 规则：
+
+- 手动传入版本号时，前后端统一使用传入的 `IMAGE_TAG`
+- 未手动传入时，默认使用打包当下的时间戳（格式：`yyyyMMddHHmmss`）
+
 ## 2. 目录结构
 
 ```
 docker/
 ├── docker-compose.standalone.yml   # 独立部署编排（推荐）
+├── build-and-up.sh                 # 自动生成 tag 或使用手动指定版本后构建并启动
+├── push-image.sh                   # 本地打包镜像并推送到远端 Registry
 ├── backend/
 │   ├── Dockerfile
 │   ├── .dockerignore
@@ -46,6 +53,7 @@ docker/
 - `docker/backend/Dockerfile`
 - `docker/nginx/default.conf`
 - `docker/docker-compose.standalone.yml`
+- `docker/build-and-up.sh`
 - `docker/backend/config/application-prod.yml`
 - `docker/DEPLOY.md`
 
@@ -108,21 +116,37 @@ spring:
 
 你要求实际打包动作在云服务器进行，因此建议把整个项目上传到云服务器后，在项目根目录执行。
 
-### 5.1 构建镜像
+### 5.1 构建并启动服务
+
+推荐统一通过脚本执行，这样可以保证同一次执行中的前后端镜像 tag 完全一致。
+
+#### 方式一：手动指定版本号
 
 ```bash
 cd docker
-docker compose -f docker-compose.standalone.yml build
+chmod +x build-and-up.sh
+./build-and-up.sh v1.0.3
 ```
 
-### 5.2 启动服务
+这会构建并启动：
+
+- `queue-backend:v1.0.3`
+- `queue-frontend:v1.0.3`
+
+#### 方式二：不传版本号，自动使用当前时间戳
 
 ```bash
 cd docker
-docker compose -f docker-compose.standalone.yml up -d
+chmod +x build-and-up.sh
+./build-and-up.sh
 ```
 
-### 5.3 查看状态
+这会自动生成类似如下 tag：
+
+- `queue-backend:20260416153045`
+- `queue-frontend:20260416153045`
+
+### 5.2 查看状态
 
 ```bash
 docker compose -f docker-compose.standalone.yml ps
@@ -135,7 +159,7 @@ queue-backend    Up
 queue-frontend   Up
 ```
 
-### 5.4 查看日志
+### 5.3 查看日志
 
 ```bash
 docker compose -f docker-compose.standalone.yml logs -f backend
@@ -170,17 +194,77 @@ http://43.155.249.87
 - 成功连接 Redis
 - 生产配置已生效
 
-## 7. 常用命令
+## 7. 本地打包并推送到远端 Registry
+
+如果你有一台远端 Docker Registry 服务，可以在本地构建好镜像后直接推送，服务器端只需要拉取即可。
+
+### 7.1 前置条件
+
+1. 本地有 Docker 环境
+2. 已登录远端 Registry：
 
 ```bash
-# 启动
-docker compose -f docker-compose.standalone.yml up -d
+docker login <registry地址>
+```
+
+### 7.2 推送镜像
+
+```bash
+cd docker
+chmod +x push-image.sh
+
+# 手动指定版本号
+./push-image.sh 43.155.249.87:5000 v1.0.3
+
+# 不传版本号，自动使用时间戳
+./push-image.sh 43.155.249.87:5000
+```
+
+脚本执行流程：
+
+1. 检查 Registry 登录状态
+2. 本地构建前后端镜像
+3. 为镜像打上远端 tag（如 `43.155.249.87:5000/queue-frontend:v1.0.3`）
+4. 推送到远端 Registry
+
+### 7.3 服务器端拉取并启动
+
+在目标服务器上执行：
+
+```bash
+# 拉取镜像
+docker pull 43.155.249.87:5000/queue-frontend:v1.0.3
+docker pull 43.155.249.87:5000/queue-backend:v1.0.3
+
+# 给本地镜像补一个短名 tag（compose 里用的名字）
+docker tag 43.155.249.87:5000/queue-frontend:v1.0.3 queue-frontend:v1.0.3
+docker tag 43.155.249.87:5000/queue-backend:v1.0.3 queue-backend:v1.0.3
+
+# 启动服务
+IMAGE_TAG=v1.0.3 docker compose -f docker-compose.standalone.yml up -d
+```
+
+> 注意：如果 Registry 使用 HTTP（非 HTTPS），需要在服务器上配置 Docker 的 `insecure-registries`，
+> 编辑 `/etc/docker/daemon.json`：
+> ```json
+> { "insecure-registries": ["43.155.249.87:5000"] }
+> ```
+> 然后重启 Docker：`sudo systemctl restart docker`
+
+## 8. 常用命令
+
+```bash
+# 自动生成时间戳 tag 后重建并启动
+./build-and-up.sh
+
+# 手动指定 tag 后重建并启动
+./build-and-up.sh v1.0.3
+
+# 本地打包并推送到远端 Registry
+./push-image.sh 43.155.249.87:5000 v1.0.3
 
 # 停止
 docker compose -f docker-compose.standalone.yml down
-
-# 重建并启动
-docker compose -f docker-compose.standalone.yml up -d --build
 
 # 查看后端日志
 docker compose -f docker-compose.standalone.yml logs -f backend
@@ -189,7 +273,7 @@ docker compose -f docker-compose.standalone.yml logs -f backend
 docker compose -f docker-compose.standalone.yml logs -f frontend
 ```
 
-## 8. 推荐部署策略结论
+## 9. 推荐部署策略结论
 
 推荐直接使用：
 

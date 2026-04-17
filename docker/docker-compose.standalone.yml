@@ -1,10 +1,10 @@
 # 公网云独立部署模式（仅 backend + frontend）
 # 适用于 MySQL 和 Redis 已经在云服务器上单独运行的场景
-# 在云服务器上执行：docker compose -f docker-compose.standalone.yml up -d --build
+# 在云服务器上优先执行：./build-and-up.sh [tag]
 
 services:
   backend:
-    image: queue-backend:latest
+    image: queue-backend:${IMAGE_TAG}
     build:
       context: ../queue-system-backend
       dockerfile: ../docker/backend/Dockerfile
@@ -20,7 +20,7 @@ services:
       - queue-net
 
   frontend:
-    image: queue-frontend:latest
+    image: queue-frontend:${IMAGE_TAG}
     build:
       context: ../queue-system-frontend
       dockerfile: ../docker/frontend/Dockerfile

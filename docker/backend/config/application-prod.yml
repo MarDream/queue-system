@@ -56,3 +56,10 @@ app:
     port: 80
   cors:
     extra-origins:
+
+logging:
+  file:
+    path: /app/logs
+  level:
+    root: INFO
+    com.queue: INFO
