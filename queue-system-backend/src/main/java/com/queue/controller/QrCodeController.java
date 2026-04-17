@@ -81,24 +81,28 @@ public class QrCodeController {
             return Result.error(400, "区域不存在");
         }
         // 权限校验
+        String createdBy = null;
         if (userId != null && userId > 0) {
             SysUser user = sysUserMapper.selectById(userId);
-            if (user != null && !"SUPER_ADMIN".equals(user.getRole())) {
-                if (user.getRegionCode() == null || user.getRegionCode().isEmpty()) {
-                    return Result.error(403, "无权操作该区域");
-                }
-                Region userRegion = regionService.getByCode(user.getRegionCode());
-                if (userRegion == null) {
-                    return Result.error(403, "无权操作该区域");
-                }
-                List<Long> allowedRegionIds = regionService.getDescendantRegionIds(userRegion.getId());
-                if (!allowedRegionIds.contains(region.getId())) {
-                    return Result.error(403, "无权操作该区域");
+            if (user != null) {
+                createdBy = user.getName();
+                if (!"SUPER_ADMIN".equals(user.getRole())) {
+                    if (user.getRegionCode() == null || user.getRegionCode().isEmpty()) {
+                        return Result.error(403, "无权操作该区域");
+                    }
+                    Region userRegion = regionService.getByCode(user.getRegionCode());
+                    if (userRegion == null) {
+                        return Result.error(403, "无权操作该区域");
+                    }
+                    List<Long> allowedRegionIds = regionService.getDescendantRegionIds(userRegion.getId());
+                    if (!allowedRegionIds.contains(region.getId())) {
+                        return Result.error(403, "无权操作该区域");
+                    }
                 }
             }
         }
         String url = effectiveBaseUrl + "/appointment?region=" + region.getRegionCode();
-        QrCodeRecord record = qrCodeRecordService.saveOrUpdate(region.getId(), region.getRegionCode(), region.getRegionName(), url);
+        QrCodeRecord record = qrCodeRecordService.saveOrUpdate(region.getId(), region.getRegionCode(), region.getRegionName(), url, createdBy);
 
         Map<String, Object> data = new HashMap<>();
         data.put("id", record.getId());
@@ -106,6 +110,8 @@ public class QrCodeController {
         data.put("regionCode", region.getRegionCode());
         data.put("regionName", region.getRegionName());
         data.put("url", url);
+        data.put("createdAt", record.getCreatedAt());
+        data.put("createdBy", record.getCreatedBy());
         return Result.ok(data);
     }
 

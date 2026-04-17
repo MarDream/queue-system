@@ -206,7 +206,10 @@
           <el-tooltip :content="item.url" placement="bottom" :show-after="500">
             <p class="qr-link">{{ truncateUrl(item.url) }}</p>
           </el-tooltip>
-          <p v-if="item.createdAt" class="qr-created">创建于 {{ formatDate(item.createdAt) }}</p>
+          <p class="qr-meta">
+            <span v-if="item.createdBy">创建人：{{ item.createdBy }}</span>
+            <span v-if="item.createdAt"> | 创建于 {{ formatDate(item.createdAt) }}</span>
+          </p>
           <div class="qr-actions">
             <el-tooltip content="下载" placement="top">
               <el-button size="small" link type="primary" @click="downloadQr(item)">
@@ -482,6 +485,7 @@ async function generateQr() {
       regionName: res.regionName,
       url: res.url,
       createdAt: res.createdAt || new Date().toISOString(),
+      createdBy: res.createdBy,
       canvasRef: null
     }
 
@@ -507,6 +511,7 @@ async function loadQrList() {
       regionName: item.regionName,
       url: item.url,
       createdAt: item.createdAt,
+      createdBy: item.createdBy,
       canvasRef: null
     }))
     await nextTick()
@@ -599,6 +604,7 @@ async function batchGenerate() {
         regionName: res.regionName,
         url: res.url,
         createdAt: res.createdAt || new Date().toISOString(),
+        createdBy: res.createdBy,
         canvasRef: null
       })
       batchProgress.successes++
@@ -635,7 +641,14 @@ function truncateUrl(url) {
 
 function formatDate(dateStr) {
   if (!dateStr) return ''
-  const d = new Date(dateStr)
+  // 支持数组格式 [2026, 4, 12, 23, 11, 46] 或字符串格式
+  let d
+  if (Array.isArray(dateStr)) {
+    d = new Date(dateStr[0], dateStr[1] - 1, dateStr[2], dateStr[3] || 0, dateStr[4] || 0, dateStr[5] || 0)
+  } else {
+    d = new Date(dateStr)
+  }
+  if (isNaN(d.getTime())) return ''
   const pad = n => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
@@ -936,7 +949,7 @@ onMounted(() => {
   cursor: default;
   line-height: 1.5;
 }
-.qr-created {
+.qr-meta {
   margin: var(--sp-1) 0 var(--sp-2) 0;
   font-size: var(--text-xs);
   color: var(--text-secondary);

@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS `qrcode_record` (
     `region_code` VARCHAR(20) NOT NULL COMMENT '区域代码（冗余，方便查询）',
     `region_name` VARCHAR(50) NOT NULL COMMENT '区域名称',
     `url` VARCHAR(500) NOT NULL COMMENT '二维码URL',
+    `created_by` VARCHAR(50) COMMENT '创建人姓名',
     `version` INT DEFAULT 0 COMMENT '乐观锁版本号',
     `deleted` TINYINT(1) DEFAULT 0 COMMENT '软删除标记：1=已删除，0=正常',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',

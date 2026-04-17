@@ -17,7 +17,7 @@ public class QrCodeRecordServiceImpl implements QrCodeRecordService {
 
     @Override
     @Transactional
-    public QrCodeRecord saveOrUpdate(Long regionId, String regionCode, String regionName, String url) {
+    public QrCodeRecord saveOrUpdate(Long regionId, String regionCode, String regionName, String url, String createdBy) {
         QrCodeRecord existing = mapper.selectOne(new LambdaQueryWrapper<QrCodeRecord>()
                 .eq(QrCodeRecord::getRegionId, regionId));
 
@@ -34,6 +34,7 @@ public class QrCodeRecordServiceImpl implements QrCodeRecordService {
         record.setRegionCode(regionCode);
         record.setRegionName(regionName);
         record.setUrl(url);
+        record.setCreatedBy(createdBy);
         mapper.insert(record);
         return record;
     }

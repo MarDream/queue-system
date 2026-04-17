@@ -14,6 +14,7 @@ public class QrCodeRecord {
     private String regionCode;         // 冗余，方便查询
     private String regionName;
     private String url;
+    private String createdBy;          // 创建人姓名
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

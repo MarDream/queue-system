@@ -4,7 +4,7 @@ import com.queue.entity.QrCodeRecord;
 import java.util.List;
 
 public interface QrCodeRecordService {
-    QrCodeRecord saveOrUpdate(Long regionId, String regionCode, String regionName, String url);
+    QrCodeRecord saveOrUpdate(Long regionId, String regionCode, String regionName, String url, String createdBy);
     List<QrCodeRecord> listAll();
     void delete(Long id);
 }

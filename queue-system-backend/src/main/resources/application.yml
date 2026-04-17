@@ -13,6 +13,8 @@ spring:
     default-property-inclusion: non_null
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai
+    serialization:
+      write_dates_as_timestamps: false
   http:
     encoding:
       enabled: true
@@ -27,3 +29,10 @@ app:
     port: 5173
   cors:
     extra-origins:     # 额外的 CORS 允许源，逗号分隔
+
+logging:
+  file:
+    path: ./logs
+  level:
+    root: INFO
+    com.queue: INFO
