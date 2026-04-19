@@ -764,7 +764,7 @@ onMounted(() => {
   user-select: none;
 }
 .drag-handle:hover {
-  color: var(--accent);
+  color: var(--primary);
 }
 
 /* 弹窗区块标题 */
@@ -801,11 +801,11 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   padding: 12px 16px;
-  background: rgba(0,229,255,0.1);
-  border: 1px solid var(--accent);
+  background: var(--primary-light);
+  border: 1px solid var(--primary);
   border-radius: 4px;
   margin-bottom: 16px;
-  color: var(--accent);
+  color: var(--primary);
   font-size: 14px;
 }
 .business-name {
@@ -816,17 +816,17 @@ onMounted(() => {
 .selected-count {
   margin-top: 12px;
   padding: 8px 12px;
-  background: rgba(0,229,255,0.1);
-  border-left: 3px solid var(--accent);
+  background: var(--primary-light);
+  border-left: 3px solid var(--primary);
   color: var(--text-primary);
   font-size: 14px;
 }
 .selected-count strong {
-  color: var(--accent);
+  color: var(--primary);
   font-size: 16px;
 }
 :deep(.disabled-row) {
-  background-color: var(--bg-void) !important;
+  background-color: var(--bg-body) !important;
   opacity: 0.7;
 }
 :deep(.business-select-dialog .el-table) {

@@ -30,24 +30,12 @@ public class QueueServiceImpl implements QueueService {
         String date = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
         String key = "queue:seq:" + regionId + ":" + businessTypeId + ":" + date;
 
-        // 确保Redis序列号不小于数据库中的最大序列号
-        Long dbMaxSeq = ticketMapper.selectMaxSequenceByBusinessTypeId(businessTypeId);
-        String currentRedisSeq = stringRedisTemplate.opsForValue().get(key);
-        long redisSeq = currentRedisSeq != null ? Long.parseLong(currentRedisSeq) : 0;
-
-        if (dbMaxSeq != null && dbMaxSeq > redisSeq) {
-            // 数据库序列号更大，需要更新Redis
-            stringRedisTemplate.opsForValue().set(key, String.valueOf(dbMaxSeq));
-            redisSeq = dbMaxSeq;
-        }
-
-        Boolean isNew = stringRedisTemplate.opsForValue().increment(key) == 1L;
-        if (Boolean.TRUE.equals(isNew)) {
+        Long seq = stringRedisTemplate.opsForValue().increment(key);
+        if (seq != null && seq == 1L) {
+            // 首次生成，设置过期时间
             stringRedisTemplate.expire(key, Duration.ofHours(48));
         }
-        Long seq = stringRedisTemplate.opsForValue().get(key) != null
-            ? Long.parseLong(stringRedisTemplate.opsForValue().get(key)) : 1L;
-        return seq;
+        return seq != null ? seq : 1L;
     }
 
     @Override

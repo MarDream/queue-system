@@ -143,11 +143,11 @@ public class ScreenController {
         }).collect(Collectors.toList());
         resp.setCounters(counterVOs);
 
-        // recentCalls: last 5 called/serving/completed/skipped
+        // recentCalls: last 20 called/serving/completed/skipped
         List<Ticket> recent = finalTodayTickets.stream()
             .filter(t -> t.getCalledAt() != null)
             .sorted((a, b) -> b.getCalledAt().compareTo(a.getCalledAt()))
-            .limit(5)
+            .limit(20)
             .collect(Collectors.toList());
 
         List<ScreenDataResponse.RecentCallVO> recentCalls = recent.stream().map(t -> {
@@ -156,6 +156,8 @@ public class ScreenController {
             Counter c = counters.stream().filter(cn -> cn.getId().equals(t.getCounterId())).findFirst().orElse(null);
             vo.setCounterName(c != null ? c.getName() : "");
             vo.setCalledAt(t.getCalledAt() != null ? t.getCalledAt().toLocalTime().toString() : "");
+            BusinessType bt = businessTypeMapper.selectById(t.getBusinessTypeId());
+            vo.setBusinessTypeName(bt != null ? bt.getName() : "");
             return vo;
         }).collect(Collectors.toList());
         resp.setRecentCalls(recentCalls);

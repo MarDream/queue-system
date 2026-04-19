@@ -15,15 +15,14 @@ export IMAGE_TAG
 echo "[queue-system] IMAGE_TAG=$IMAGE_TAG"
 echo "[queue-system] Working directory: $SCRIPT_DIR"
 
-# 使用绝对路径指定 compose 文件
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.standalone.yml"
 
-# 检查 compose 文件是否存在
 if [ ! -f "$COMPOSE_FILE" ]; then
   echo "ERROR: Compose file not found: $COMPOSE_FILE"
   exit 1
 fi
 
 echo "[queue-system] Compose file: $COMPOSE_FILE"
+echo "[queue-system] Starting backend container only"
 
-docker compose -f "$COMPOSE_FILE" up -d --build
+docker compose -f "$COMPOSE_FILE" up -d --build backend

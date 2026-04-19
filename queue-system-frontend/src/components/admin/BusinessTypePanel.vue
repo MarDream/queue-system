@@ -43,11 +43,11 @@
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialogVisible" width="500px" draggable resizable :show-close="false">
+    <el-dialog v-model="dialogVisible" width="520px" draggable top="8vh" :show-close="false" :close-on-click-modal="false" custom-class="biz-dialog">
       <template #header>
         <div class="dialog-header">
           <span class="dialog-title">{{ isEdit ? '编辑业务类型' : '新增业务类型' }}</span>
-          <el-button circle size="small" class="icon-close-btn" @click="dialogVisible = false" title="关闭">
+          <el-button circle size="large" class="icon-close-btn" @click="dialogVisible = false" title="关闭">
             <svg class="close-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="10"/>
               <path d="M15 9l-6 6M9 9l6 6"/>
@@ -55,27 +55,55 @@
           </el-button>
         </div>
       </template>
-      <el-form :model="form" label-width="100px" ref="formRef">
-        <el-form-item label="名称" prop="name" required>
-          <el-input v-model="form.name" @input="onNameChange" placeholder="请输入业务名称" />
-        </el-form-item>
-        <el-form-item label="前缀" prop="prefix">
-          <el-input v-model="form.prefix" maxlength="3" style="width:120px" />
-          <span class="prefix-hint">默认为名称首字大写，可手动修改</span>
-        </el-form-item>
-        <el-form-item label="描述" prop="description">
-          <el-input v-model="form.description" type="textarea" />
-        </el-form-item>
-        <el-form-item label="排序" prop="sortOrder">
-          <el-input-number v-model="form.sortOrder" :min="0" />
-        </el-form-item>
-        <el-form-item label="启用">
-          <el-switch v-model="form.isEnabled" />
-        </el-form-item>
-      </el-form>
+
+      <div class="biz-form">
+        <!-- 名称 + 前缀 -->
+        <div class="form-field">
+          <label class="field-label">业务名称</label>
+          <div class="input-with-prefix">
+            <div class="input-with-prefix__main">
+              <el-input v-model="form.name" @input="onNameInput" placeholder="如：个人业务" />
+              <div class="field-meta">
+                <span v-if="form.name.length > 0" class="char-count">{{ form.name.length }}/50</span>
+              </div>
+            </div>
+            <div class="prefix-badge">
+              <span class="prefix-badge-label">前缀</span>
+              <el-input v-model="form.prefix" @input="onPrefixInput" placeholder="A" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 描述 -->
+        <div class="form-field">
+          <label class="field-label">描述</label>
+          <el-input v-model="form.description" type="textarea" @input="onDescriptionInput" placeholder="简要说明此业务类型的用途" :rows="3" resize="none" />
+          <div class="field-meta">
+            <span v-if="form.description.length > 0" class="char-count">{{ form.description.length }}/200</span>
+          </div>
+        </div>
+
+        <!-- 系统设置 - 水平卡片 -->
+        <div class="settings-strip">
+          <div class="setting-item">
+            <span class="setting-label">排序</span>
+            <el-input-number v-model="form.sortOrder" :min="0" :max="999" controls-position="right" size="small" />
+            <span class="setting-hint">越小越靠前</span>
+          </div>
+          <div class="setting-divider"></div>
+          <div class="setting-item setting-item-switch">
+            <span class="setting-label">状态</span>
+            <el-switch v-model="form.isEnabled" size="small" />
+            <span class="setting-value">{{ form.isEnabled ? '启用' : '停用' }}</span>
+          </div>
+        </div>
+      </div>
+
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
+        <div class="dialog-footer">
+          <el-button @click="dialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
+        </div>
       </template>
     </el-dialog>
   </div>
@@ -142,9 +170,29 @@ function getFirstChar(text) {
   return PINYIN_MAP[ch] || ''
 }
 
-function onNameChange(val) {
-  if (isEdit.value) return // 编辑时不自动改
-  form.value.prefix = getFirstChar(val)
+// 名称输入处理：超过50字截断，编辑时不自动改前缀
+function onNameInput(val) {
+  if (val.length > 50) {
+    form.value.name = val.slice(0, 50)
+    return
+  }
+  if (!isEdit.value) {
+    form.value.prefix = getFirstChar(val)
+  }
+}
+
+// 前缀输入处理：超过5字符截断
+function onPrefixInput(val) {
+  if (val.length > 5) {
+    form.value.prefix = val.slice(0, 5)
+  }
+}
+
+// 描述输入处理：超过200字截断
+function onDescriptionInput(val) {
+  if (val.length > 200) {
+    form.value.description = val.slice(0, 200)
+  }
 }
 
 async function fetchList() {
@@ -271,9 +319,178 @@ onMounted(() => {
 .drag-handle:hover {
   color: #409eff;
 }
-.prefix-hint {
-  margin-left: 8px;
+
+/* ─── 对话框 ─── */
+:global(.biz-dialog) {
+  border-radius: 12px !important;
+  overflow: hidden;
+}
+
+:global(.biz-dialog .el-dialog__header) {
+  margin: 0 !important;
+  padding: 20px 24px !important;
+  border-bottom: 1px solid var(--border) !important;
+  background: var(--bg-card) !important;
+}
+
+:global(.biz-dialog .el-dialog__body) {
+  padding: 0 !important;
+}
+
+:global(.biz-dialog .el-dialog__footer) {
+  padding: 0 !important;
+}
+
+/* ─── 表单主体 ─── */
+.biz-form {
+  padding: 24px;
+}
+
+.form-field {
+  margin-bottom: 20px;
+}
+
+.form-field:last-of-type {
+  margin-bottom: 0;
+}
+
+.field-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+/* ─── 名称 + 前缀 ─── */
+.input-with-prefix {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.input-with-prefix__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.prefix-badge {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: flex-start;
+  width: 90px;
+  flex-shrink: 0;
+  padding: 8px 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.prefix-badge-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.prefix-badge :deep(.el-input) {
+  width: 100%;
+}
+
+.prefix-badge :deep(.el-input__wrapper) {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  min-height: auto !important;
+}
+
+.prefix-badge :deep(.el-input__inner) {
+  font-family: var(--mono) !important;
+  font-weight: 600;
+  font-size: 14px !important;
+  color: var(--primary) !important;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+/* ─── 字段元信息 ─── */
+.field-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  min-height: 18px;
+}
+
+.char-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+}
+
+/* ─── 描述 textarea ─── */
+.form-field :deep(.el-textarea__inner) {
+  width: 100% !important;
+  border-radius: var(--radius-md) !important;
+}
+
+/* ─── 系统设置条 ─── */
+.settings-strip {
+  display: flex;
+  align-items: center;
+  margin-top: 24px;
+  padding: 14px 16px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.setting-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.setting-label {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.setting-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.setting-value {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.setting-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 16px;
+}
+
+.setting-item-switch {
+  margin-left: auto;
+}
+
+/* ─── 对话框底部 ─── */
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-card);
 }
 </style>

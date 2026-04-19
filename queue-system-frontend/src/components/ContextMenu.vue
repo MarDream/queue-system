@@ -127,8 +127,8 @@ function select(item) {
 }
 
 .context-menu-item:hover {
-  background: var(--accent-glow);
-  color: var(--accent);
+  background: var(--primary-light);
+  color: var(--primary);
 }
 
 .context-menu-item.disabled {
@@ -141,8 +141,8 @@ function select(item) {
 }
 
 .context-menu-item.active {
-  background: var(--accent-glow);
-  color: var(--accent);
+  background: var(--primary-light);
+  color: var(--primary);
   font-weight: 500;
 }
 

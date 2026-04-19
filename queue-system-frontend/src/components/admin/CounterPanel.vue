@@ -15,6 +15,8 @@
           filterable
           :filter-method="filterRegionByName"
           style="width:200px"
+          class="region-select"
+          popper-class="region-select-popper"
           @change="onFilterChange"
         />
       </div>
@@ -146,7 +148,7 @@
               <span class="stat-label">均等待时长(min)</span>
             </div>
             <div class="stat-card hero-stat">
-              <span class="stat-value">{{ stats.currentTicketNo || '—' }}</span>
+              <span class="stat-value">{{ getDisplayTicketNo(stats.currentTicketNo) || '—' }}</span>
               <span class="stat-label">当前票号</span>
             </div>
           </div>
@@ -175,7 +177,7 @@
                 <span class="rh">服务时长</span>
               </div>
               <div v-for="rec in stats.recentServices" :key="rec.ticketNo" class="recent-row">
-                <span class="rd mono">{{ rec.ticketNo }}</span>
+                <span class="rd mono">{{ getDisplayTicketNo(rec.ticketNo) }}</span>
                 <span class="rd">{{ rec.businessTypeName }}</span>
                 <span class="rd">{{ rec.customerName || '—' }}</span>
                 <span class="rd">
@@ -215,6 +217,8 @@
             filterable
             :filter-method="filterRegionByName"
             style="width:100%"
+            class="region-select"
+            popper-class="region-select-popper"
             @change="onRegionChange"
           />
         </el-form-item>
@@ -251,6 +255,7 @@ import { StatusBadge } from './index.js'
 import request from '../../api/index'
 import { counterApi } from '../../api/admin'
 import { useUserStore } from '../../stores/user'
+import { getDisplayTicketNo } from '../../utils/ticketUtils'
 
 const userStore = useUserStore()
 
@@ -625,13 +630,73 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
+/* 优化 el-tree-select 样式 */
+:deep(.region-select) {
+  .el-select__wrapper {
+    min-height: 32px;
+    line-height: 1.5;
+  }
+
+  .el-select__wrapper.is-focused,
+  .el-select__wrapper:hover {
+    border-color: var(--border-input) !important;
+    outline: none !important;
+    box-shadow: none !important;
+  }
+}
+
+:deep(.region-select-popper),
+:deep(.el-select-dropdown.region-select-popper) {
+  padding: 4px 0;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  background: var(--bg-card);
+}
+
+:deep(.region-select-popper .el-tree-node__content) {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 4px;
+  margin: 0 4px;
+  transition: background 0.15s ease;
+}
+
+:deep(.region-select-popper .el-tree-node__content:hover) {
+  background: var(--primary-light);
+}
+
+:deep(.region-select-popper .el-tree-node__expand-icon) {
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  color: var(--text-secondary);
+  transition: transform 0.2s ease;
+}
+
+:deep(.region-select-popper .el-tree-node__expand-icon.is-leaf) {
+  display: none;
+}
+
+:deep(.region-select-popper .el-select-dropdown__item) {
+  padding: 0;
+  margin: 0;
+}
+
+:deep(.region-select-popper .el-tree) {
+  padding: 4px 0;
+}
+
+:deep(.region-select-popper .el-tree-node__children) {
+  padding-left: 16px;
+}
+
 /* 筛选栏 */
 .filter-bar {
   display: flex;
   align-items: center;
   gap: var(--sp-4);
   padding: var(--sp-3) var(--sp-4);
-  background: var(--bg-panel);
+  background: #f7f8fa;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   margin-bottom: var(--sp-4);
@@ -664,7 +729,7 @@ onUnmounted(() => {
 
 .selection-count {
   font-size: var(--text-sm);
-  color: var(--accent);
+  color: var(--primary);
   font-weight: 600;
   margin-right: var(--sp-2);
   white-space: nowrap;
@@ -688,7 +753,7 @@ onUnmounted(() => {
 .right-pane {
   flex: 1;
   min-width: 0;
-  background: var(--bg-panel);
+  background: #f7f8fa;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   overflow-y: auto;
@@ -718,18 +783,18 @@ onUnmounted(() => {
 }
 
 .card-active {
-  border-color: var(--accent);
+  border-color: var(--primary);
   box-shadow: var(--glow-accent);
 }
 
 .card-selected {
   border-color: var(--accent-dim);
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--primary);
 }
 
 .card-selected.card-active {
-  border-color: var(--accent);
-  border-left: 3px solid var(--accent);
+  border-color: var(--primary);
+  border-left: 3px solid var(--primary);
   box-shadow: var(--glow-accent);
 }
 
@@ -853,7 +918,7 @@ onUnmounted(() => {
 .stat-value {
   font-size: var(--text-xl);
   font-weight: 700;
-  color: var(--accent);
+  color: var(--primary);
   font-family: var(--mono);
 }
 
@@ -936,7 +1001,7 @@ onUnmounted(() => {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--bg-panel);
+  background: #f7f8fa;
   color: var(--text-secondary);
   font-weight: 600;
   font-size: var(--text-xs);
@@ -956,7 +1021,7 @@ onUnmounted(() => {
 
 .rd.mono {
   font-family: var(--mono);
-  color: var(--accent);
+  color: var(--primary);
 }
 
 /* 空状态 */

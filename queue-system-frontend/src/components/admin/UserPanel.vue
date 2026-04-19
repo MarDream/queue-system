@@ -133,31 +133,31 @@
           </el-button>
         </div>
       </template>
-      <el-form :model="form" label-width="90px" class="user-form">
-        <el-form-item label="用户名" required>
+      <el-form ref="formRef" :model="form" :rules="formRules" label-width="90px" class="user-form">
+        <el-form-item label="用户名" prop="username">
           <el-input v-model="form.username" :disabled="isEdit" placeholder="请输入用户名" />
         </el-form-item>
         <el-form-item label="姓名">
           <el-input v-model="form.name" placeholder="请输入姓名" />
         </el-form-item>
-        <el-form-item label="角色" required>
+        <el-form-item label="角色" prop="role">
           <el-select v-model="form.role" placeholder="请选择角色" style="width:100%" @change="onRoleChange">
             <el-option v-for="r in availableRoles" :key="r.value" :label="r.label" :value="r.value" />
           </el-select>
         </el-form-item>
-        <el-form-item label="管辖区域">
+        <el-form-item label="管辖区域" prop="regionId">
           <el-tree-select
             v-model="form.regionId"
             :data="regionTree"
             :props="{ label: 'name', value: 'id', children: 'children' }"
-            placeholder="请选择区域（可选）"
+            placeholder="请选择管辖区域"
             clearable
             check-strictly
             :render-after-expand="false"
             filterable
             :filter-method="filterRegionByName"
             style="width:100%"
-            :disabled="form.role === 'SUPER_ADMIN' || form.role === 'WINDOW_OPERATOR'"
+            :disabled="form.role === 'SUPER_ADMIN'"
           />
         </el-form-item>
         <el-form-item label="状态">
@@ -224,7 +224,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '../../api/index'
@@ -284,6 +284,25 @@ function onMenuToggle(group) {
     permForm.value.buttonIds = permForm.value.buttonIds.filter(id => !buttonIds.includes(id))
   }
 }
+
+const formRef = ref(null)
+
+const formRules = computed(() => ({
+  username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
+  role: [{ required: true, message: '请选择角色', trigger: 'change' }],
+  regionId: [{
+    validator: (rule, value, callback) => {
+      if (form.value.role === 'SUPER_ADMIN') {
+        callback()
+      } else if (!value) {
+        callback(new Error('请选择管辖区域'))
+      } else {
+        callback()
+      }
+    },
+    trigger: 'change'
+  }]
+}))
 
 const form = ref({
   username: '',
@@ -418,8 +437,10 @@ function handleSearch() {
 }
 
 function onRoleChange() {
-  // 超级管理员和窗口操作员不需要区域
-  if (form.value.role === 'SUPER_ADMIN' || form.value.role === 'WINDOW_OPERATOR') {
+  // 切换角色时清除区域校验提示
+  formRef.value?.clearValidate(['regionId'])
+  // 超级管理员不需要区域，清空；窗口操作员保留区域选择能力
+  if (form.value.role === 'SUPER_ADMIN') {
     form.value.regionId = null
   }
   // 区域管理员角色时，如果当前区域为空且操作者是区域管理员，默认选操作者自己的区域
@@ -452,6 +473,9 @@ function openEdit(row) {
     status: row.status,
     password: ''
   }
+  nextTick(() => {
+    formRef.value?.clearValidate()
+  })
   dialogVisible.value = true
 }
 
@@ -467,12 +491,10 @@ function handleAction(cmd, row) {
 }
 
 async function handleSave() {
-  if (!form.value.username) {
-    ElMessage.warning('请输入用户名')
-    return
-  }
-  if (!form.value.role) {
-    ElMessage.warning('请选择角色')
+  if (!formRef.value) return
+  try {
+    await formRef.value.validate()
+  } catch {
     return
   }
   if (!isEdit.value && !form.value.password) {
@@ -671,8 +693,8 @@ onMounted(() => {
 }
 
 .stat-card {
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%);
-  color: var(--bg-void);
+  background: linear-gradient(135deg, var(--primary) 0%, var(--accent-dim) 100%);
+  color: #ffffff;
   padding: var(--sp-4) var(--sp-6);
   border-radius: var(--radius-lg);
   min-width: 140px;
@@ -750,8 +772,8 @@ onMounted(() => {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--accent), var(--accent-dim));
-  color: var(--bg-void);
+  background: linear-gradient(135deg, var(--primary), var(--accent-dim));
+  color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -840,7 +862,7 @@ onMounted(() => {
 }
 
 .perm-info strong {
-  color: var(--accent);
+  color: var(--primary);
 }
 
 .perm-groups {

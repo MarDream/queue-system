@@ -122,6 +122,33 @@ export const menuApi = {
     request.delete<void>(`/admin/menus/${id}`)
 }
 
+// 统计分析 API
+export const statisticsApi = {
+  list: (params?: {
+    regionId?: number;
+    businessTypeId?: number;
+    startDate?: string;
+    endDate?: string;
+    pageNum?: number;
+    pageSize?: number;
+  }) => request.get('/admin/statistics/list', { params }),
+
+  export: (params?: {
+    regionId?: number;
+    businessTypeId?: number;
+    startDate?: string;
+    endDate?: string;
+  }) => {
+    const url = new URL('/api/v1/admin/statistics/export', window.location.origin)
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => {
+        if (v != null) url.searchParams.set(k, String(v))
+      })
+    }
+    window.open(url.toString(), '_blank')
+  }
+}
+
 // 用户权限管理 API
 export const userPermissionApi = {
   // 获取用户权限

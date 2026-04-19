@@ -147,6 +147,18 @@ public class AdminController {
             return Result.ok(Collections.emptyList());
         }
 
+        // 窗口操作员只能看到自己被分配的窗口
+        if (userId != null && userId > 0) {
+            SysUser user = sysUserMapper.selectById(userId);
+            if (user != null && "WINDOW_OPERATOR".equals(user.getRole())) {
+                List<Long> assignedCounterIds = counterOperatorMapper.selectCounterIdsByUserId(userId);
+                if (assignedCounterIds == null || assignedCounterIds.isEmpty()) {
+                    return Result.ok(Collections.emptyList());
+                }
+                qw.in("id", assignedCounterIds);
+            }
+        }
+
         List<Counter> counters = counterMapper.selectList(qw);
         List<CounterDTO> dtos = counters.stream().map(c -> {
             // 状态恢复：柜台为 busy 但无有效服务中票号，自动恢复为 idle

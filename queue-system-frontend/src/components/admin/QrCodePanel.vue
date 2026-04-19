@@ -203,9 +203,6 @@
             <h4>{{ item.regionName }}</h4>
           </div>
           <canvas :ref="el => item.canvasRef = el" class="qr-canvas" :style="{width: qrConfig.size+'px', height: qrConfig.size+'px'}" @click="previewQr(item)"></canvas>
-          <el-tooltip :content="item.url" placement="bottom" :show-after="500">
-            <p class="qr-link">{{ truncateUrl(item.url) }}</p>
-          </el-tooltip>
           <p class="qr-meta">
             <span v-if="item.createdBy">创建人：{{ item.createdBy }}</span>
             <span v-if="item.createdAt"> | 创建于 {{ formatDate(item.createdAt) }}</span>
@@ -745,15 +742,15 @@ onMounted(() => {
 }
 .preset-card:hover {
   border-color: var(--border-hi);
-  background: var(--bg-panel);
+  background: #f7f8fa;
 }
 .preset-card.active {
-  border-color: var(--accent);
-  background: var(--accent-glow);
+  border-color: var(--primary);
+  background: var(--primary-light);
   box-shadow: var(--glow-accent);
 }
 .preset-icon { font-size: 20px; color: var(--text-secondary); }
-.preset-card.active .preset-icon { color: var(--accent); }
+.preset-card.active .preset-icon { color: var(--primary); }
 .preset-name {
   font-size: var(--text-sm);
   font-weight: 600;

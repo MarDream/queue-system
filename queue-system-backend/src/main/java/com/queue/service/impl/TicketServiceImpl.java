@@ -25,10 +25,13 @@ import com.queue.mapper.TicketMapper;
 import com.queue.service.QueueService;
 import com.queue.service.TicketService;
 import com.queue.util.PhoneUtil;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
@@ -43,14 +46,16 @@ public class TicketServiceImpl implements TicketService {
     private final RegionMapper regionMapper;
     private final RegionBusinessMapper regionBusinessMapper;
     private final QueueService queueService;
+    private final StringRedisTemplate stringRedisTemplate;
 
-    public TicketServiceImpl(TicketMapper ticketMapper, BusinessTypeMapper businessTypeMapper, CounterMapper counterMapper, RegionMapper regionMapper, RegionBusinessMapper regionBusinessMapper, QueueService queueService) {
+    public TicketServiceImpl(TicketMapper ticketMapper, BusinessTypeMapper businessTypeMapper, CounterMapper counterMapper, RegionMapper regionMapper, RegionBusinessMapper regionBusinessMapper, QueueService queueService, StringRedisTemplate stringRedisTemplate) {
         this.ticketMapper = ticketMapper;
         this.businessTypeMapper = businessTypeMapper;
         this.counterMapper = counterMapper;
         this.regionMapper = regionMapper;
         this.regionBusinessMapper = regionBusinessMapper;
         this.queueService = queueService;
+        this.stringRedisTemplate = stringRedisTemplate;
     }
 
     @Override
@@ -80,6 +85,13 @@ public class TicketServiceImpl implements TicketService {
             throw new BusinessException(50001, "该业务类型在当前区域不可用");
         }
 
+        // 查询区域代码，用于生成含区域标识的唯一票号
+        Region region = regionMapper.selectById(regionId);
+        if (region == null || region.getRegionCode() == null) {
+            throw new BusinessException(50001, "区域信息不完整，无法生成票号");
+        }
+        String regionCode = region.getRegionCode();
+
         // 校验该区域是否启用了此业务类型
         RegionBusiness rb = regionBusinessMapper.selectOne(
             new QueryWrapper<RegionBusiness>()
@@ -101,21 +113,46 @@ public class TicketServiceImpl implements TicketService {
         String ticketNo = null;
         Ticket ticket = null;
         try {
-            List<Ticket> existing = ticketMapper.selectList(
+            // 查找当日同手机号+同业务类型的所有记录（含已办结）
+            List<Ticket> todayTickets = ticketMapper.selectList(
                 new QueryWrapper<Ticket>()
-                    .eq("region_id", regionId)
                     .eq("phone", maskedPhone)
                     .eq("business_type_id", request.getBusinessTypeId())
-                    .in("status", TicketStatus.WAITING.getValue(), TicketStatus.CALLED.getValue(), TicketStatus.SERVING.getValue())
                     .apply("DATE(created_at) = CURDATE()")
             );
-            if (!existing.isEmpty()) {
-                throw new BusinessException(ResultCode.DUPLICATE_TICKET);
+
+            if (!todayTickets.isEmpty()) {
+                // 找出未办结的票（WAITING/CALLED/SERVING）
+                List<Ticket> unfinished = todayTickets.stream()
+                    .filter(t -> {
+                        String s = t.getStatus();
+                        return TicketStatus.WAITING.getValue().equals(s)
+                            || TicketStatus.CALLED.getValue().equals(s)
+                            || TicketStatus.SERVING.getValue().equals(s);
+                    })
+                    .toList();
+
+                if (!unfinished.isEmpty()) {
+                    // 存在未办结票：姓名必须一致
+                    String firstName = unfinished.get(0).getName();
+                    if (request.getName() != null && !request.getName().equals(firstName)) {
+                        throw new BusinessException(ResultCode.DUPLICATE_TICKET);
+                    }
+                    // 姓名一致，禁止重复取号
+                    throw new BusinessException(ResultCode.DUPLICATE_TICKET);
+                }
+
+                // 无未办结票（同手机号+业务类型今日已全部办结）：姓名必须与首张票一致
+                String firstName = todayTickets.get(0).getName();
+                if (request.getName() != null && !request.getName().equals(firstName)) {
+                    throw new BusinessException(50001, "该手机号今日已使用其他姓名取号，无法使用不同姓名取号");
+                }
             }
 
             // 3. Generate sequence and ticket number
+            // 新格式：{区域代码(6位)}{业务前缀(1位)}{当日序号(3位)}，如 440300A001
             long seq = queueService.generateSequence(regionId, request.getBusinessTypeId());
-            ticketNo = bt.getPrefix() + String.format("%03d", seq);
+            ticketNo = regionCode + bt.getPrefix() + String.format("%03d", seq);
 
             // 4. Insert ticket with masked phone
             ticket = new Ticket();
@@ -128,6 +165,13 @@ public class TicketServiceImpl implements TicketService {
             ticket.setStatus(TicketStatus.WAITING.getValue());
             ticket.setCreatedAt(LocalDateTime.now());
             ticketMapper.insert(ticket);
+
+            // 设置 Redis 过期 Key，当日午夜自动触发过号标记
+            String expireKey = "ticket:expire:" + ticket.getId();
+            long secondsUntilMidnight = Duration.between(LocalDateTime.now(), LocalDateTime.now().toLocalDate().plusDays(1).atStartOfDay()).getSeconds();
+            if (secondsUntilMidnight > 0) {
+                stringRedisTemplate.opsForValue().set(expireKey, ticket.getTicketNo(), Duration.ofSeconds(secondsUntilMidnight));
+            }
 
             // 5. Enqueue in Redis
             queueService.enqueue(regionId, request.getBusinessTypeId(), ticket.getId());
@@ -342,5 +386,40 @@ public class TicketServiceImpl implements TicketService {
             vo.setCompletedAt(t.getCompletedAt());
             return vo;
         }).toList();
+    }
+
+    @Override
+    @Transactional
+    public void markAsSkipped(Long ticketId) {
+        Ticket ticket = ticketMapper.selectById(ticketId);
+        if (ticket == null) return;
+        String status = ticket.getStatus();
+        if (TicketStatus.WAITING.getValue().equals(status)
+            || TicketStatus.CALLED.getValue().equals(status)
+            || TicketStatus.SERVING.getValue().equals(status)) {
+            ticket.setStatus(TicketStatus.SKIPPED.getValue());
+            ticketMapper.updateById(ticket);
+            // 从 Redis 队列移除
+            queueService.dequeue(ticket.getRegionId(), ticket.getBusinessTypeId(), ticketId);
+            queueService.decrementWaitingCount(ticket.getRegionId(), ticket.getBusinessTypeId());
+        }
+    }
+
+    @Override
+    @Transactional
+    public int markExpiredTickets() {
+        // 查询所有非当日且仍处于未办结状态的票
+        List<Ticket> expiredTickets = ticketMapper.selectList(
+            new QueryWrapper<Ticket>()
+                .in("status", TicketStatus.WAITING.getValue(), TicketStatus.CALLED.getValue(), TicketStatus.SERVING.getValue())
+                .apply("DATE(created_at) < CURDATE()")
+        );
+        for (Ticket ticket : expiredTickets) {
+            ticket.setStatus(TicketStatus.SKIPPED.getValue());
+            ticketMapper.updateById(ticket);
+            queueService.dequeue(ticket.getRegionId(), ticket.getBusinessTypeId(), ticket.getId());
+            queueService.decrementWaitingCount(ticket.getRegionId(), ticket.getBusinessTypeId());
+        }
+        return expiredTickets.size();
     }
 }

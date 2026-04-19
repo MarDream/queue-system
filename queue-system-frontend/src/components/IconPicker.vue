@@ -222,14 +222,14 @@ const filteredEmojis = computed(() => {
   background: var(--bg-raised, #f5f7fa);
 }
 .icon-cell:hover {
-  border-color: var(--accent, #409eff);
-  background: rgba(0, 229, 255, 0.06);
+  border-color: var(--primary, #0052d9);
+  background: var(--primary-light);
   transform: translateY(-1px);
 }
 .icon-cell.selected {
-  border-color: var(--accent, #409eff);
-  background: rgba(0, 229, 255, 0.1);
-  box-shadow: 0 0 0 1px var(--accent, #409eff);
+  border-color: var(--primary, #0052d9);
+  background: var(--primary-light);
+  box-shadow: 0 0 0 1px var(--primary, #0052d9);
 }
 
 .icon-name {

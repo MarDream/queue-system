@@ -185,7 +185,7 @@
               </td>
             </tr>
             <tr v-for="row in detailList" :key="row.id">
-              <td class="cell-ticket-no">{{ row.ticketNo }}</td>
+              <td class="cell-ticket-no">{{ getDisplayTicketNo(row.ticketNo) }}</td>
               <td>{{ row.businessType }}</td>
               <td>{{ row.regionName || '—' }}</td>
               <td>{{ row.name || '—' }}</td>
@@ -213,6 +213,7 @@ import { ref, computed, onMounted } from 'vue'
 import { Search, Refresh } from '@element-plus/icons-vue'
 import { getDashboard, getTicketList, getBusinessTypeDetail } from '../../api/screen'
 import { useUserStore } from '../../stores/user'
+import { getDisplayTicketNo } from '../../utils/ticketUtils'
 
 const userStore = useUserStore()
 
@@ -361,8 +362,8 @@ function formatTime(time) {
   text-align: center;
 }
 .summary-card.clickable { cursor: pointer; transition: border-color 0.2s, background 0.2s; }
-.summary-card.clickable:hover { border-color: var(--accent); background: var(--accent-glow); }
-.sc-value { font-size: 28px; color: var(--accent); margin-bottom: 4px; font-family: var(--mono); }
+.summary-card.clickable:hover { border-color: var(--primary); background: var(--primary-light); }
+.sc-value { font-size: 28px; color: var(--primary); margin-bottom: 4px; font-family: var(--mono); }
 .sc-label { font-size: 11px; color: var(--text-muted); letter-spacing: 0.06em; text-transform: uppercase; }
 .section-title {
   font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
@@ -404,7 +405,7 @@ function formatTime(time) {
 }
 .biz-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+  background: linear-gradient(90deg, var(--primary-hover), var(--primary));
   border-radius: 3px;
   transition: width 0.6s ease;
   min-width: 2px;
@@ -422,7 +423,7 @@ function formatTime(time) {
 
 /* ── 业务明细弹窗 ─────────────────────────────────── */
 .biz-detail-dialog .el-dialog {
-  background: var(--bg-panel) !important;
+  background: #f7f8fa !important;
   border: 1px solid var(--border) !important;
   border-radius: 8px !important;
 }
@@ -440,14 +441,14 @@ function formatTime(time) {
 }
 .biz-dlg-title { font-size: 16px; font-weight: 700; color: var(--text-primary); }
 .biz-dlg-count { font-size: 12px; color: var(--text-muted); }
-.biz-dlg-count strong { color: var(--accent); font-size: 14px; }
+.biz-dlg-count strong { color: var(--primary); font-size: 14px; }
 .biz-detail-table { margin-top: 0; }
 </style>
 
 <style>
 /* ── Dialog ─────────────────────────────────────────────────── */
 .ticket-detail-dialog .el-dialog {
-  background: var(--bg-panel) !important;
+  background: #f7f8fa !important;
   border: 1px solid var(--border) !important;
   border-radius: 8px !important;
   box-shadow: 0 24px 80px rgba(0,0,0,0.6) !important;
@@ -455,13 +456,13 @@ function formatTime(time) {
 .ticket-detail-dialog .el-dialog__header { padding: 0 !important; margin: 0 !important; }
 .ticket-detail-dialog .el-dialog__body { padding: 0 !important; }
 .ticket-detail-dialog .el-dialog__headerbtn .el-dialog__close { color: var(--text-secondary) !important; }
-.ticket-detail-dialog .el-dialog__headerbtn:hover .el-dialog__close { color: var(--accent) !important; }
+.ticket-detail-dialog .el-dialog__headerbtn:hover .el-dialog__close { color: var(--primary) !important; }
 
 /* ── 头部 ─────────────────────────────────────────────────── */
 .dlg-header {
   padding: 18px 24px 0;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-panel);
+  background: #f7f8fa;
   border-radius: 8px 8px 0 0;
 }
 .dlg-title-row {
@@ -475,7 +476,7 @@ function formatTime(time) {
   font-size: 16px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.02em;
 }
 .dlg-count { font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
-.count-num { font-family: var(--mono); font-size: 14px; color: var(--accent); font-weight: 700; }
+.count-num { font-family: var(--mono); font-size: 14px; color: var(--primary); font-weight: 700; }
 .dlg-actions { display: flex; align-items: center; gap: 8px; }
 .icon-btn {
   background: transparent !important;
@@ -484,9 +485,9 @@ function formatTime(time) {
   transition: all 0.15s;
 }
 .icon-btn:hover {
-  border-color: var(--accent) !important;
-  color: var(--accent) !important;
-  background: var(--accent-glow) !important;
+  border-color: var(--primary) !important;
+  color: var(--primary) !important;
+  background: var(--primary-light) !important;
 }
 .icon-svg {
   width: 16px;
@@ -515,19 +516,19 @@ function formatTime(time) {
 .filter-bar .el-date-editor.el-input__wrapper:hover { border-color: var(--border-hi) !important; }
 .filter-bar .el-input__wrapper.is-focus,
 .filter-bar .el-date-editor.el-input__wrapper:focus {
-  border-color: var(--accent) !important;
-  box-shadow: 0 0 0 1px var(--accent-glow) !important;
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 1px var(--primary-light) !important;
 }
 .filter-bar .el-input__inner { color: var(--text-primary) !important; font-family: var(--sans); font-size: 13px; }
 .filter-bar .el-range-input { color: var(--text-primary) !important; font-family: var(--sans); font-size: 13px; }
 .filter-bar .el-range-separator { color: var(--text-muted) !important; }
 .filter-bar .el-input__placeholder { color: var(--text-muted) !important; }
 .btn-search {
-  background: var(--accent) !important; border: none !important;
+  background: var(--primary) !important; border: none !important;
   color: #0a0b0e !important; font-weight: 700 !important;
   letter-spacing: 0.06em !important; font-family: var(--cond) !important; transition: all 0.15s;
 }
-.btn-search:hover { opacity: 0.85; box-shadow: 0 0 20px var(--accent-glow); }
+.btn-search:hover { opacity: 0.85; box-shadow: 0 0 20px var(--primary-light); }
 .btn-reset {
   background: transparent !important; border: 1px solid var(--border) !important;
   color: var(--text-secondary) !important; font-family: var(--cond) !important; letter-spacing: 0.04em;
@@ -539,7 +540,7 @@ function formatTime(time) {
 .data-table { width: 100%; border-collapse: collapse; font-family: var(--sans); font-size: 13.5px; color: var(--text-primary); }
 .data-table thead { position: sticky; top: 0; z-index: 2; }
 .data-table thead th {
-  background: var(--bg-panel);
+  background: #f7f8fa;
   color: var(--text-secondary);
   font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
   padding: 11px 14px; text-align: left;
@@ -551,7 +552,7 @@ function formatTime(time) {
 .data-table tbody tr:hover { background: var(--bg-raised) !important; }
 .data-table tbody tr:last-child { border-bottom: none; }
 .data-table tbody td { padding: 11px 14px; color: var(--text-primary); vertical-align: middle; }
-.data-table tbody td.cell-ticket-no { font-family: var(--mono); font-size: 14px; color: var(--accent); letter-spacing: 0.06em; }
+.data-table tbody td.cell-ticket-no { font-family: var(--mono); font-size: 14px; color: var(--primary); letter-spacing: 0.06em; }
 .empty-cell { text-align: center; padding: 56px 0 !important; color: var(--text-muted); }
 .empty-icon { display: block; font-size: 32px; margin-bottom: 10px; opacity: 0.5; }
 
@@ -565,8 +566,8 @@ function formatTime(time) {
 .status-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
 .status-WAITING   { background: rgba(255,152,0,0.1);  color: #ff9800; border-color: rgba(255,152,0,0.25); }
 .status-WAITING  .status-dot { background: #ff9800; box-shadow: 0 0 4px #ff9800; }
-.status-CALLED    { background: rgba(0,229,255,0.1);  color: #00e5ff; border-color: rgba(0,229,255,0.25); }
-.status-CALLED   .status-dot { background: #00e5ff; box-shadow: 0 0 4px #00e5ff; }
+.status-CALLED    { background: rgba(0,82,217,0.12);  color: #0052d9; border-color: rgba(0,82,217,0.22); }
+.status-CALLED   .status-dot { background: #0052d9; box-shadow: 0 0 4px #0052d9; }
 .status-SERVING   { background: rgba(0,230,118,0.1);  color: #00e676; border-color: rgba(0,230,118,0.25); }
 .status-SERVING  .status-dot { background: #00e676; box-shadow: 0 0 4px #00e676; animation: pulse-dot 1.4s ease infinite; }
 .status-COMPLETED { background: rgba(74,85,104,0.15); color: #8892a4; border-color: rgba(74,85,104,0.3); }

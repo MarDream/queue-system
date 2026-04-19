@@ -19,14 +19,18 @@ public class QrCodeRecordServiceImpl implements QrCodeRecordService {
     @Transactional
     public QrCodeRecord saveOrUpdate(Long regionId, String regionCode, String regionName, String url, String createdBy) {
         QrCodeRecord existing = mapper.selectOne(new LambdaQueryWrapper<QrCodeRecord>()
-                .eq(QrCodeRecord::getRegionId, regionId));
+                .eq(QrCodeRecord::getRegionId, regionId)
+                .eq(QrCodeRecord::getDeleted, 0));
 
         if (existing != null) {
             existing.setUrl(url);
             existing.setRegionCode(regionCode);
             existing.setRegionName(regionName);
+            if (createdBy != null && !createdBy.isEmpty()) {
+                existing.setCreatedBy(createdBy);
+            }
             mapper.updateById(existing);
-            return existing;
+            return mapper.selectById(existing.getId());
         }
 
         QrCodeRecord record = new QrCodeRecord();
@@ -35,6 +39,7 @@ public class QrCodeRecordServiceImpl implements QrCodeRecordService {
         record.setRegionName(regionName);
         record.setUrl(url);
         record.setCreatedBy(createdBy);
+        record.setDeleted(0);
         mapper.insert(record);
         return record;
     }
@@ -42,6 +47,7 @@ public class QrCodeRecordServiceImpl implements QrCodeRecordService {
     @Override
     public List<QrCodeRecord> listAll() {
         return mapper.selectList(new LambdaQueryWrapper<QrCodeRecord>()
+                .eq(QrCodeRecord::getDeleted, 0)
                 .orderByDesc(QrCodeRecord::getCreatedAt));
     }
 

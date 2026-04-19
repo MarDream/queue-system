@@ -19,4 +19,14 @@ public interface TicketService {
     ActiveTicketResponse getActiveTicket(Long regionId, String phone);
     List<AdminTicketVO> listTickets(String status, String date, String startDate, String endDate, String phone, String name, String ticketNo);
     List<AdminTicketVO> listTickets(String status, String date, String startDate, String endDate, String phone, String name, String ticketNo, Set<Long> allowedRegionIds);
+
+    /**
+     * 标记指定票号为过号（Redis过期监听器调用）
+     */
+    void markAsSkipped(Long ticketId);
+
+    /**
+     * 扫描并标记所有历史未办结票为过号（登录触发/凌晨定时）
+     */
+    int markExpiredTickets();
 }

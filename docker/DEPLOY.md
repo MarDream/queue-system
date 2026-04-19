@@ -6,70 +6,67 @@
 
 - 云服务器公网 IP：`43.155.249.87`
 - 操作系统：Linux
-- MySQL 和 Redis 已经在云服务器上通过 Docker 独立运行
-- 本次只部署前端和后端两个服务
-- 前端通过公网地址 `http://43.155.249.87` 访问
+- MySQL、Redis、Nginx 已经在云服务器上独立部署
+- Docker 仅负责运行后端服务
+- 前端通过独立 Nginx 托管 `dist/` 并对外提供访问
 
 镜像命名固定为：
 
-- 前端：`queue-frontend`
 - 后端：`queue-backend`
 
 镜像 tag 规则：
 
-- 手动传入版本号时，前后端统一使用传入的 `IMAGE_TAG`
+- 手动传入版本号时，后端使用传入的 `IMAGE_TAG`
 - 未手动传入时，默认使用打包当下的时间戳（格式：`yyyyMMddHHmmss`）
 
 ## 2. 目录结构
 
-```
+```text
 docker/
-├── docker-compose.standalone.yml   # 独立部署编排（推荐）
-├── build-and-up.sh                 # 自动生成 tag 或使用手动指定版本后构建并启动
-├── push-image.sh                   # 本地打包镜像并推送到远端 Registry
+├── docker-compose.standalone.yml   # 独立部署编排（仅 backend）
+├── build-and-up.sh                 # 自动生成 tag 或使用手动指定版本后构建并启动 backend
+├── push-image.sh                   # 本地打包 backend 镜像并推送到远端 Registry
 ├── backend/
 │   ├── Dockerfile
 │   ├── .dockerignore
 │   └── config/
 │       └── application-prod.yml    # 生产配置模板，部署前手动填写密码
 ├── frontend/
-│   ├── Dockerfile
+│   ├── Dockerfile                  # 仅用于构建并导出 dist
 │   └── .dockerignore
 ├── nginx/
-│   └── default.conf                # 前端 Nginx 配置
+│   └── default.conf                # 独立 Nginx 配置参考模板
 └── DEPLOY.md
 ```
 
 ## 3. 影响范围分析
 
 ### 原代码设计意图
-- 前端通过 `queue-system-frontend/src/api/index.ts:4` 和 `queue-system-frontend/src/api/counter.js:3` 固定访问 `/api/v1`
+- 前端通过 `queue-system-frontend/src/api/index.ts:4` 和 `queue-system-frontend/src/api/counter.js:3` 访问 `/api/v1`
 - 开发环境由 `queue-system-frontend/vite.config.js:37` 代理 `/api` 到本地后端
-- 后端通过 `queue-system-backend/src/main/resources/application.yml:10` 默认启用 `dev` 配置
-- 后端 `app.ip` 与 `app.frontend.port` 由 `queue-system-backend/src/main/java/com/queue/config/ServerConfig.java:19` 读取，影响二维码、回显地址与 CORS
-- JWT 密钥由 `queue-system-backend/src/main/java/com/queue/util/JwtUtil.java:18` 读取
+- 后端通过挂载的 `docker/backend/config/application-prod.yml` 读取生产配置
+- 后端 `app.ip` 与 `app.frontend.port` 会影响二维码、回显地址与 CORS
 
 ### 本次直接影响
-- `docker/backend/Dockerfile`
-- `docker/nginx/default.conf`
 - `docker/docker-compose.standalone.yml`
 - `docker/build-and-up.sh`
-- `docker/backend/config/application-prod.yml`
+- `docker/push-image.sh`
+- `docker/frontend/Dockerfile`
 - `docker/DEPLOY.md`
 
 ### 间接影响
-- 前端公网访问改为 Nginx 承载静态资源并转发 `/api`
-- 后端生产环境将通过外部挂载配置连接宿主机上的 MySQL/Redis
-- 生产环境不再依赖 `.env` 注入数据库和 Redis 密码，而是改为挂载配置文件
+- 前端发布流程改为单独构建 `dist/` 并同步到独立 Nginx 目录
+- 后端通过宿主机 `8080` 端口提供 API，供独立 Nginx 反向代理
+- Docker 不再承载前端运行时 Nginx
 
 ### 风险等级
 - 中风险
 
 ### 风险说明
 1. `host.docker.internal` 依赖 `extra_hosts: host-gateway`，要求目标 Docker 版本支持该特性
-2. 若现有 MySQL/Redis 容器未映射到宿主机 `3306/6379`，后端将无法连接
+2. 若现有 MySQL/Redis 未映射到宿主机 `3306/6379`，后端将无法连接
 3. 若未填写 `application-prod.yml` 中的密码和 JWT 密钥，后端会启动失败或登录鉴权异常
-4. 当前 Nginx `server_name` 固定为 `43.155.249.87`，若后续改域名需同步调整
+4. 独立 Nginx 的 `/api` 代理目标必须改成服务器实际可访问的后端地址，不能继续照搬容器内主机名
 
 ## 4. 配置步骤
 
@@ -101,26 +98,44 @@ spring:
       port: 6379
 ```
 
-### 4.2 检查前端 Nginx 配置
+### 4.2 检查独立 Nginx 配置
 
-`docker/nginx/default.conf` 已经配置：
+前端线上访问依赖独立 Nginx，最少需要满足：
 
-- 监听 `80`
-- `server_name 43.155.249.87`
-- `/api/` 代理到 `http://queue-backend:8080/api/`
-- `/` 使用 `try_files` 支持单页路由回退
+- `root` 指向前端 `dist/` 目录
+- `/` 使用 `try_files $uri $uri/ /index.html`
+- `/api/` 代理到后端，例如 `http://127.0.0.1:8080/api/`
 
-如果后续公网地址不是 `43.155.249.87`，需要同步修改 `server_name`。
+可参考 `docker/nginx/default.conf`，但需要按你的线上环境改成真实地址。
 
-## 5. 云服务器打包与启动
+示例：
 
-你要求实际打包动作在云服务器进行，因此建议把整个项目上传到云服务器后，在项目根目录执行。
+```nginx
+server {
+    listen 80;
+    server_name 43.155.249.87 zxmeng.asia www.zxmeng.asia;
 
-### 5.1 构建并启动服务
+    root /data/www/queue-system;
+    index index.html;
 
-推荐统一通过脚本执行，这样可以保证同一次执行中的前后端镜像 tag 完全一致。
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
 
-#### 方式一：手动指定版本号
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+```
+
+## 5. 云服务器部署后端
+
+### 5.1 构建并启动 backend
 
 ```bash
 cd docker
@@ -128,12 +143,7 @@ chmod +x build-and-up.sh
 ./build-and-up.sh v1.0.3
 ```
 
-这会构建并启动：
-
-- `queue-backend:v1.0.3`
-- `queue-frontend:v1.0.3`
-
-#### 方式二：不传版本号，自动使用当前时间戳
+或自动生成时间戳 tag：
 
 ```bash
 cd docker
@@ -141,10 +151,9 @@ chmod +x build-and-up.sh
 ./build-and-up.sh
 ```
 
-这会自动生成类似如下 tag：
+这会构建并启动：
 
-- `queue-backend:20260416153045`
-- `queue-frontend:20260416153045`
+- `queue-backend:<IMAGE_TAG>`
 
 ### 5.2 查看状态
 
@@ -152,51 +161,58 @@ chmod +x build-and-up.sh
 docker compose -f docker-compose.standalone.yml ps
 ```
 
-预期至少看到：
+预期看到：
 
 ```text
 queue-backend    Up
-queue-frontend   Up
 ```
 
 ### 5.3 查看日志
 
 ```bash
 docker compose -f docker-compose.standalone.yml logs -f backend
-docker compose -f docker-compose.standalone.yml logs -f frontend
 ```
 
-## 6. 验证方法
+## 6. 构建并发布前端 dist
 
-### 6.1 访问验证
+### 6.1 直接本机构建
 
-浏览器打开：
+```bash
+cd queue-system-frontend
+npm ci
+npm run build
+```
+
+构建产物位于：
 
 ```text
-http://43.155.249.87
+queue-system-frontend/dist/
 ```
 
-应能正常打开前端页面。
+将其同步到独立 Nginx 站点目录，例如：
 
-### 6.2 API 代理验证
+```bash
+rsync -av --delete queue-system-frontend/dist/ /data/www/queue-system/
+```
 
-在浏览器开发者工具中检查前端请求：
+### 6.2 使用 Docker 导出 dist
 
-- 请求路径应为 `/api/v1/...`
-- 由 Nginx 转发到 `queue-backend:8080`
-- 不应出现跨域错误
+前端 `docker/frontend/Dockerfile` 现在只负责构建并导出 `dist`，不再内置 Nginx。
 
-### 6.3 后端连接验证
+```bash
+docker build -f docker/frontend/Dockerfile -t queue-frontend-dist queue-system-frontend
+docker run --rm -v "$(pwd)/frontend-dist:/output" queue-frontend-dist
+```
 
-检查后端日志确认：
+导出的静态文件位于：
 
-- 成功连接 MySQL
-- 成功连接 Redis
-- 生产配置已生效
+```text
+./frontend-dist/
+```
+
+然后再同步到独立 Nginx 站点目录。
 
 ## 7. 本地打包并推送到远端 Registry
-
-如果你有一台远端 Docker Registry 服务，可以在本地构建好镜像后直接推送，服务器端只需要拉取即可。
 
 ### 7.1 前置条件
 
@@ -207,7 +223,7 @@ http://43.155.249.87
 docker login <registry地址>
 ```
 
-### 7.2 推送镜像
+### 7.2 推送 backend 镜像
 
 ```bash
 cd docker
@@ -223,67 +239,85 @@ chmod +x push-image.sh
 脚本执行流程：
 
 1. 检查 Registry 登录状态
-2. 本地构建前后端镜像
-3. 为镜像打上远端 tag（如 `43.155.249.87:5000/queue-frontend:v1.0.3`）
+2. 本地构建 backend 镜像
+3. 为镜像打上远端 tag
 4. 推送到远端 Registry
 
-### 7.3 服务器端拉取并启动
+### 7.3 服务器端拉取并启动 backend
 
 在目标服务器上执行：
 
 ```bash
-# 拉取镜像
-docker pull 43.155.249.87:5000/queue-frontend:v1.0.3
 docker pull 43.155.249.87:5000/queue-backend:v1.0.3
-
-# 给本地镜像补一个短名 tag（compose 里用的名字）
-docker tag 43.155.249.87:5000/queue-frontend:v1.0.3 queue-frontend:v1.0.3
 docker tag 43.155.249.87:5000/queue-backend:v1.0.3 queue-backend:v1.0.3
-
-# 启动服务
-IMAGE_TAG=v1.0.3 docker compose -f docker-compose.standalone.yml up -d
+IMAGE_TAG=v1.0.3 docker compose -f docker-compose.standalone.yml up -d backend
 ```
 
-> 注意：如果 Registry 使用 HTTP（非 HTTPS），需要在服务器上配置 Docker 的 `insecure-registries`，
-> 编辑 `/etc/docker/daemon.json`：
-> ```json
-> { "insecure-registries": ["43.155.249.87:5000"] }
-> ```
-> 然后重启 Docker：`sudo systemctl restart docker`
+> 注意：如果 Registry 使用 HTTP（非 HTTPS），需要在服务器上配置 Docker 的 `insecure-registries`。
 
-## 8. 常用命令
+## 8. 验证方法
+
+### 8.1 前端访问验证
+
+浏览器打开：
+
+```text
+http://43.155.249.87
+```
+
+应能正常打开前端页面，并且刷新非首页路由不应返回 404。
+
+### 8.2 API 代理验证
+
+在浏览器开发者工具中检查前端请求：
+
+- 请求路径应为 `/api/v1/...`
+- 由独立 Nginx 转发到 `127.0.0.1:8080` 或你的实际后端地址
+- 不应出现跨域错误
+
+### 8.3 后端连接验证
+
+检查后端日志确认：
+
+- 成功连接 MySQL
+- 成功连接 Redis
+- 生产配置已生效
+
+## 9. 常用命令
 
 ```bash
-# 自动生成时间戳 tag 后重建并启动
+# 自动生成时间戳 tag 后重建并启动 backend
 ./build-and-up.sh
 
-# 手动指定 tag 后重建并启动
+# 手动指定 tag 后重建并启动 backend
 ./build-and-up.sh v1.0.3
 
-# 本地打包并推送到远端 Registry
+# 本地打包并推送 backend 到远端 Registry
 ./push-image.sh 43.155.249.87:5000 v1.0.3
 
-# 停止
-docker compose -f docker-compose.standalone.yml down
-
-# 查看后端日志
+# 查看 backend 日志
 docker compose -f docker-compose.standalone.yml logs -f backend
 
-# 查看前端日志
-docker compose -f docker-compose.standalone.yml logs -f frontend
+# 停止 backend
+docker compose -f docker-compose.standalone.yml down
+
+# Docker 构建并导出前端 dist
+docker build -f docker/frontend/Dockerfile -t queue-frontend-dist queue-system-frontend
+docker run --rm -v "$(pwd)/frontend-dist:/output" queue-frontend-dist
 ```
 
-## 9. 推荐部署策略结论
+## 10. 推荐部署策略结论
 
 推荐直接使用：
 
 - `docker/docker-compose.standalone.yml`
+- `docker/build-and-up.sh`
+- `docker/push-image.sh`
 - `docker/backend/config/application-prod.yml`
-- `docker/nginx/default.conf`
 
 原因：
 
-1. 最符合你现在的云环境：MySQL/Redis 已存在，不重复编排
-2. 敏感信息不写死在镜像里，而是通过挂载外部配置文件提供
-3. 前端直接暴露公网 `80` 端口，公网 IP 可直接访问
-4. 保持前端 `/api/v1` 现有调用方式不变，改动最小
+1. 最符合你现在的线上环境：MySQL、Redis、Nginx 已独立存在，不重复编排
+2. Docker 只负责后端，职责清晰，发布链路更简单
+3. 前端继续保持 `/api/v1` 相对路径调用方式，不需要额外改代码
+4. 独立 Nginx 统一处理静态资源、路由回退和 `/api` 反向代理

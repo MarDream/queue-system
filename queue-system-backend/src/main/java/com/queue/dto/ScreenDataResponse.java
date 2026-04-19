@@ -42,6 +42,7 @@ public class ScreenDataResponse {
         private String ticketNo;
         private String counterName;
         private String calledAt;
+        private String businessTypeName;
     }
 
     @Data

@@ -22,6 +22,7 @@ import com.queue.mapper.SysUserMapper;
 import com.queue.mapper.SysUserMenuMapper;
 import com.queue.mapper.SysUserButtonMapper;
 import com.queue.service.SysUserService;
+import com.queue.service.TicketService;
 import com.queue.util.JwtUtil;
 import com.queue.util.PasswordUtil;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +46,7 @@ public class SysUserServiceImpl implements SysUserService {
     private final SysUserButtonMapper sysUserButtonMapper;
     private final RegionMapper regionMapper;
     private final JwtUtil jwtUtil;
+    private final TicketService ticketService;
 
     @Override
     public LoginVO login(LoginRequest request) {
@@ -90,6 +92,14 @@ public class SysUserServiceImpl implements SysUserService {
             Region region = regionMapper.selectById(user.getRegionId());
             if (region != null) {
                 vo.setRegionName(region.getRegionName());
+            }
+        }
+
+        // 窗口操作员登录时，自动扫描历史未办结票并标记为过号
+        if ("WINDOW_OPERATOR".equals(user.getRole())) {
+            int skipped = ticketService.markExpiredTickets();
+            if (skipped > 0) {
+                System.out.println("INFO: 登录时扫描到 " + skipped + " 张历史未办结票，已自动标记为过号");
             }
         }
 

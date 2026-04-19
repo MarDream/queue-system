@@ -1,42 +1,36 @@
 <template>
   <div class="login-page">
-    <div class="login-container">
+    <div class="login-card">
       <div class="login-header">
-        <span class="live-dot"></span>
-        <h1 class="title"><img src="/favicon.png" class="brand-icon" alt="QMS" /> 排队系统</h1>
-        <p class="subtitle">Queue Management System</p>
+        <div class="logo-mark">
+          <img src="/favicon.png" alt="QMS" />
+        </div>
+        <h1 class="login-title">排队叫号系统</h1>
+        <p class="login-subtitle">Queue Management System</p>
       </div>
+
       <el-form ref="formRef" :model="form" :rules="rules" class="login-form">
-        <el-form-item prop="username">
-          <el-input
-            v-model="form.username"
-            placeholder="请输入用户名"
-            prefix-icon="User"
-            size="large"
-          />
-        </el-form-item>
-        <el-form-item prop="password">
-          <el-input
-            v-model="form.password"
-            type="password"
-            placeholder="请输入密码"
-            prefix-icon="Lock"
-            size="large"
-            @keyup.enter="handleLogin"
-          />
-        </el-form-item>
-        <el-form-item>
-          <el-button
-            type="primary"
-            size="large"
-            :loading="loading"
-            class="login-btn"
-            @click="handleLogin"
-          >
+        <div class="field-group">
+          <label class="field-label">用户名</label>
+          <el-form-item prop="username">
+            <el-input v-model="form.username" placeholder="请输入用户名" size="large" />
+          </el-form-item>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">密码</label>
+          <el-form-item prop="password">
+            <el-input v-model="form.password" type="password" placeholder="请输入密码" size="large" @keyup.enter="handleLogin" />
+          </el-form-item>
+        </div>
+
+        <el-form-item class="submit-item">
+          <el-button type="primary" size="large" :loading="loading" class="login-btn" @click="handleLogin">
             登录
           </el-button>
         </el-form-item>
       </el-form>
+
       <div class="login-footer">
         <span class="version">v1.0.0</span>
       </div>
@@ -81,7 +75,6 @@ async function handleLogin() {
         userStore.setUser(userData)
         ElMessage.success('登录成功')
 
-        // 根据角色跳转
         if (userData.role === 'WINDOW_OPERATOR') {
           router.push('/counter')
         } else {
@@ -106,143 +99,119 @@ async function handleLogin() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-void);
-  position: relative;
-  overflow: hidden;
-  padding: var(--sp-4);
+  padding: 24px;
+  background:
+    linear-gradient(135deg, rgba(0, 82, 217, 0.08) 0%, rgba(0, 82, 217, 0.02) 42%, transparent 72%),
+    var(--bg-body);
 }
 
-/* Background gradient accent */
-.login-page::before {
-  content: '';
-  position: absolute;
-  top: -20%; right: -10%;
-  width: 60vw;
-  height: 60vw;
-  max-width: 800px;
-  max-height: 800px;
-  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
-  opacity: 0.4;
-  pointer-events: none;
-}
-
-.login-page::after {
-  content: '';
-  position: absolute;
-  bottom: -20%; left: -10%;
-  width: 40vw;
-  height: 40vw;
-  max-width: 500px;
-  max-height: 500px;
-  background: radial-gradient(circle, rgba(138,43,226,0.1) 0%, transparent 70%);
-  opacity: 0.5;
-  pointer-events: none;
-}
-
-.login-container {
+.login-card {
   width: 100%;
   max-width: 420px;
-  padding: var(--sp-10);
+  padding: 40px;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg), 0 0 60px rgba(0,229,255,0.05);
-  position: relative;
-  z-index: 1;
+  box-shadow: var(--shadow-lg);
 }
 
 .login-header {
   text-align: center;
-  margin-bottom: var(--sp-8);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--sp-2);
+  margin-bottom: 32px;
 }
 
-.login-header .live-dot {
-  margin-bottom: var(--sp-2);
-}
-
-.title {
-  font-size: var(--text-2xl);
-  color: var(--text-primary);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  line-height: 1.3;
+.logo-mark {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 16px;
+  border-radius: 14px;
+  background: var(--primary-light);
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--sp-2);
-}
-.title .brand-icon {
-  height: 1.2em;
-  width: auto;
 }
 
-.subtitle {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
+.logo-mark img {
+  width: 34px;
+  height: 34px;
+}
+
+.login-title {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.login-subtitle {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
 }
 
 .login-form {
-  margin-top: var(--sp-6);
+  margin-top: 0;
+}
+
+.field-group {
+  margin-bottom: 20px;
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.login-page :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+
+.login-page :deep(.el-input__wrapper) {
+  min-height: 40px;
+}
+
+.login-page :deep(.el-form-item__error) {
+  font-size: 12px;
+  padding-top: 4px;
+}
+
+.submit-item {
+  margin-top: 8px;
 }
 
 .login-btn {
   width: 100%;
-  min-height: var(--touch-lg);
+  min-height: 40px;
   font-size: var(--text-base);
-  border-radius: var(--radius-md);
 }
 
 .login-footer {
-  text-align: center;
-  margin-top: var(--sp-8);
-  padding-top: var(--sp-6);
+  margin-top: 24px;
+  padding-top: 16px;
   border-top: 1px solid var(--border);
+  text-align: center;
 }
 
 .version {
   font-size: var(--text-xs);
   color: var(--text-muted);
-  font-family: var(--mono);
 }
 
-/* Tablet */
-@media (max-width: 768px) {
-  .login-container {
-    padding: var(--sp-8);
-    max-width: 100%;
-  }
-
-  .title {
-    font-size: var(--text-xl);
-  }
-}
-
-/* Mobile */
 @media (max-width: 480px) {
   .login-page {
-    padding: var(--sp-3);
+    padding: 16px;
     align-items: flex-start;
-    padding-top: 15vh;
+    padding-top: 12vh;
   }
 
-  .login-container {
-    padding: var(--sp-6);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-md);
+  .login-card {
+    padding: 28px 20px;
   }
 
-  .login-header {
-    margin-bottom: var(--sp-6);
-  }
-
-  .title {
-    font-size: var(--text-lg);
+  .login-title {
+    font-size: 24px;
   }
 }
 </style>

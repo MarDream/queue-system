@@ -48,15 +48,15 @@
           {{ activeTicket.statusText || '等待中' }}
         </div>
         <div class="ticket-card">
-          <div class="ticket-no">{{ activeTicket.ticketNo }}</div>
+          <div class="ticket-no">{{ getDisplayTicketNo(activeTicket.ticketNo) }}</div>
           <div class="ticket-biz">{{ activeTicket.businessTypeName }}</div>
         </div>
         <div class="ticket-info">
-          <div v-if="activeTicket.status === 'WAITING'" class="info-item">
+          <div v-if="activeTicket.waitingCount != null && activeTicket.waitingCount > 0" class="info-item">
             <span class="info-label">前方等待</span>
-            <span class="info-value">{{ activeTicket.waitingCount || 0 }} 人</span>
+            <span class="info-value">{{ activeTicket.waitingCount }} 人</span>
           </div>
-          <div v-if="activeTicket.status === 'WAITING'" class="info-item">
+          <div v-if="activeTicket.waitingCount != null && activeTicket.waitingCount > 0" class="info-item">
             <span class="info-label">预计等待</span>
             <span class="info-value">约 {{ activeTicket.estimatedWaitMinutes || 0 }} 分钟</span>
           </div>
@@ -118,7 +118,7 @@
         <div class="success-icon">✓</div>
         <h2>取号成功</h2>
         <div class="ticket-card">
-          <div class="ticket-no">{{ ticketResult.ticketNo }}</div>
+          <div class="ticket-no">{{ getDisplayTicketNo(ticketResult.ticketNo) }}</div>
           <div class="ticket-biz">{{ ticketResult.businessType }}</div>
         </div>
         <div class="ticket-info">
@@ -145,6 +145,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
+import { getDisplayTicketNo } from '../utils/ticketUtils'
 
 const API_BASE = ''
 
@@ -331,7 +332,15 @@ function retry() {
 
 function formatTime(timeStr) {
   if (!timeStr) return ''
-  const d = new Date(timeStr)
+  // 兼容 LocalDateTime 数组格式 [year, month, day, hour, minute, second] 和 ISO 字符串格式
+  let d
+  if (Array.isArray(timeStr)) {
+    // 注意：JS 的 month 是 0-11，比 LocalDateTime 小 1
+    d = new Date(timeStr[0], timeStr[1] - 1, timeStr[2], timeStr[3], timeStr[4], timeStr[5] || 0)
+  } else {
+    d = new Date(timeStr)
+  }
+  if (isNaN(d.getTime())) return '—'
   return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
@@ -349,104 +358,80 @@ function onBusinessSelectFocus() {
 <style scoped>
 .appointment-page {
   min-height: 100vh;
-  background: var(--bg-void);
-  padding: var(--sp-6) var(--sp-4);
-  position: relative;
-}
-
-.appointment-page::before {
-  content: '';
-  position: absolute;
-  top: -30%; right: -20%;
-  width: 70vw;
-  height: 70vw;
-  max-width: 600px;
-  max-height: 600px;
-  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
-  opacity: 0.3;
-  pointer-events: none;
+  background: var(--bg-body);
+  padding: var(--sp-8) var(--sp-4);
 }
 
 .header {
   text-align: center;
-  color: var(--text-primary);
   margin-bottom: var(--sp-8);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--sp-2);
-  position: relative;
-  z-index: 1;
-}
-
-.header .live-dot {
-  margin-bottom: var(--sp-1);
 }
 
 .header h1 {
   font-size: var(--text-2xl);
-  margin-bottom: 0;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .subtitle {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  letter-spacing: 0.1em;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
 }
 
 .content {
-  max-width: 480px;
+  max-width: 520px;
   margin: 0 auto;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--sp-8);
-  box-shadow: var(--shadow-lg), 0 0 60px rgba(0,229,255,0.03);
-  position: relative;
-  z-index: 1;
+  box-shadow: var(--shadow-lg);
 }
 
-.error-state {
+.error-state,
+.query-section,
+.tracking-section,
+.success-section {
   text-align: center;
-  padding: var(--sp-10) 0;
 }
 
-.error-icon {
+.error-icon,
+.success-icon {
   width: 64px;
   height: 64px;
-  background: var(--danger-glow);
-  color: var(--danger);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: var(--text-3xl);
-  font-weight: bold;
+  font-size: 32px;
+  font-weight: 700;
   margin: 0 auto var(--sp-4);
-  border: 1px solid rgba(244,67,54,0.3);
 }
 
-.error-state p {
-  color: var(--text-secondary);
-  margin-bottom: var(--sp-6);
+.error-icon {
+  background: var(--danger-light);
+  color: var(--danger);
+  border: 1px solid rgba(227, 77, 89, 0.2);
 }
 
-/* 手机号查询 */
-.query-section {
-  text-align: center;
+.success-icon {
+  background: var(--success-light);
+  color: var(--success);
+  border: 1px solid rgba(43, 196, 138, 0.2);
 }
 
+.error-state p,
 .query-desc {
   color: var(--text-secondary);
-  font-size: var(--text-sm);
   margin-bottom: var(--sp-6);
 }
 
-/* 排队进度 */
-.tracking-section {
-  text-align: center;
+.tracking-section,
+.success-section {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -454,35 +439,29 @@ function onBusinessSelectFocus() {
 
 .status-badge {
   display: inline-block;
-  padding: var(--sp-1) var(--sp-4);
-  border-radius: 20px;
+  padding: 6px 16px;
+  border-radius: 999px;
   font-size: var(--text-sm);
   font-weight: 600;
   margin-bottom: var(--sp-5);
 }
 
 .status-badge.waiting {
-  background: rgba(255, 193, 7, 0.15);
-  color: #ffc107;
-  border: 1px solid rgba(255, 193, 7, 0.3);
+  background: var(--warning-light);
+  color: var(--warning);
+  border: 1px solid rgba(255, 160, 0, 0.2);
 }
 
 .status-badge.called {
-  background: rgba(0, 229, 255, 0.15);
-  color: var(--accent);
-  border: 1px solid rgba(0, 229, 255, 0.3);
-  animation: pulse 1.5s infinite;
+  background: var(--info-light);
+  color: var(--info);
+  border: 1px solid rgba(0, 82, 217, 0.2);
 }
 
 .status-badge.serving {
-  background: rgba(0, 230, 118, 0.15);
+  background: var(--success-light);
   color: var(--success);
-  border: 1px solid rgba(0, 230, 118, 0.3);
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+  border: 1px solid rgba(43, 196, 138, 0.2);
 }
 
 .form-group {
@@ -492,7 +471,7 @@ function onBusinessSelectFocus() {
 .form-group label {
   display: block;
   font-size: var(--text-sm);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-weight: 500;
   margin-bottom: var(--sp-2);
 }
@@ -500,20 +479,19 @@ function onBusinessSelectFocus() {
 .input {
   width: 100%;
   padding: var(--sp-3) var(--sp-4);
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  background: #fff;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-size: var(--text-base);
   box-sizing: border-box;
-  transition: border-color var(--duration-fast);
+  transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
   min-height: var(--touch-md);
 }
 
 .input:focus {
   outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-glow);
+  border-color: var(--primary);
 }
 
 .input::placeholder {
@@ -522,7 +500,7 @@ function onBusinessSelectFocus() {
 
 .select {
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238892a4' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666666' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 12px center;
   cursor: pointer;
@@ -535,7 +513,8 @@ function onBusinessSelectFocus() {
   flex-wrap: wrap;
 }
 
-.btn-primary, .btn-secondary {
+.btn-primary,
+.btn-secondary {
   flex: 1;
   min-width: 0;
   padding: var(--sp-3) var(--sp-6);
@@ -544,73 +523,52 @@ function onBusinessSelectFocus() {
   font-weight: 600;
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
-  border: 1.5px solid;
-  min-height: var(--touch-lg);
+  border: 1px solid;
+  min-height: var(--touch-md);
+  white-space: nowrap;
 }
 
 .btn-primary {
-  background: transparent;
-  border-color: var(--accent);
-  color: var(--accent);
-  box-shadow: var(--glow-accent);
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--accent-glow);
-  box-shadow: var(--glow-accent-lg);
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
 }
 
 .btn-primary:disabled {
-  opacity: 0.3;
+  opacity: 0.5;
   cursor: not-allowed;
-  box-shadow: none;
 }
 
 .btn-secondary {
-  background: transparent;
-  border-color: var(--border-hi);
-  color: var(--text-secondary);
+  background: #fff;
+  border-color: var(--border-input);
+  color: var(--text-primary);
 }
 
 .btn-secondary:hover {
-  border-color: var(--text-secondary);
-  background: var(--bg-raised);
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-light);
 }
 
 .tips {
   margin-top: var(--sp-6);
   padding: var(--sp-4);
-  background: var(--bg-raised);
+  background: #f7f8fa;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
 }
 
 .tips p {
   font-size: var(--text-xs);
-  color: var(--text-muted);
+  color: var(--text-secondary);
   line-height: 1.8;
   margin: 0;
-}
-
-.success-section {
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.success-icon {
-  width: 72px;
-  height: 72px;
-  background: var(--success-glow);
-  color: var(--success);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 36px;
-  margin-bottom: var(--sp-4);
-  border: 1px solid rgba(0,230,118,0.3);
 }
 
 .success-section h2 {
@@ -620,22 +578,22 @@ function onBusinessSelectFocus() {
 }
 
 .ticket-card {
-  background: linear-gradient(135deg, rgba(0,229,255,0.1) 0%, rgba(0,151,167,0.05) 100%);
-  border: 1px solid rgba(0,229,255,0.3);
-  border-radius: var(--radius-lg);
-  padding: var(--sp-8);
-  color: var(--accent);
-  margin-bottom: var(--sp-6);
   width: 100%;
   box-sizing: border-box;
+  background: linear-gradient(180deg, #ffffff 0%, #f7faff 100%);
+  border: 1px solid rgba(0, 82, 217, 0.16);
+  border-top: 4px solid var(--primary);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-8);
+  margin-bottom: var(--sp-6);
 }
 
 .ticket-no {
   font-size: var(--text-hero);
-  font-weight: bold;
+  font-weight: 700;
   letter-spacing: 0.08em;
   font-family: var(--mono);
-  text-shadow: 0 0 30px var(--accent-glow);
+  color: var(--primary);
   line-height: 1.1;
 }
 
@@ -654,7 +612,7 @@ function onBusinessSelectFocus() {
 
 .info-item {
   flex: 1;
-  background: var(--bg-raised);
+  background: #f7f8fa;
   border-radius: var(--radius-md);
   padding: var(--sp-4);
   border: 1px solid var(--border);
@@ -674,21 +632,15 @@ function onBusinessSelectFocus() {
   color: var(--text-primary);
 }
 
-/* Tablet */
 @media (max-width: 768px) {
   .content {
     padding: var(--sp-6);
   }
 }
 
-/* Mobile - thumb-friendly */
 @media (max-width: 480px) {
   .appointment-page {
     padding: var(--sp-4) var(--sp-3);
-  }
-
-  .header {
-    margin-bottom: var(--sp-6);
   }
 
   .content {
@@ -697,20 +649,17 @@ function onBusinessSelectFocus() {
   }
 
   .input {
-    font-size: 16px; /* Prevents iOS zoom on focus */
+    font-size: 16px;
   }
 
-  .action-row {
-    flex-direction: column;
-  }
-
-  .btn-primary, .btn-secondary {
-    width: 100%;
-  }
-
+  .action-row,
   .ticket-info {
     flex-direction: column;
-    gap: var(--sp-3);
+  }
+
+  .btn-primary,
+  .btn-secondary {
+    width: 100%;
   }
 }
 </style>

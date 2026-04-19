@@ -424,7 +424,8 @@ INSERT INTO sys_menu (name, path, icon, sort_order, parent_id, type) VALUES
 ('取号', '/kiosk', 'Tickets', 2, NULL, 'menu'),
 ('大屏', '/display', 'Monitor', 3, NULL, 'menu'),
 ('窗口', '/counter', 'OfficeBuilding', 4, NULL, 'menu'),
-('管理', '/admin', 'Setting', 5, NULL, 'menu');
+('管理', '/admin', 'Setting', 5, NULL, 'menu'),
+('统计分析', '/admin?tab=statistics', 'DataAnalysis', 8, 5, 'menu');
 
 -- 初始化系统按钮数据
 INSERT INTO sys_button (menu_id, name, code, sort_order) VALUES
@@ -436,15 +437,15 @@ INSERT INTO sys_button (menu_id, name, code, sort_order) VALUES
 
 -- 初始化超级管理员权限
 INSERT INTO sys_role_menu (role, menu_id) VALUES
-('SUPER_ADMIN', 1), ('SUPER_ADMIN', 2), ('SUPER_ADMIN', 3), ('SUPER_ADMIN', 4), ('SUPER_ADMIN', 5);
+('SUPER_ADMIN', 1), ('SUPER_ADMIN', 2), ('SUPER_ADMIN', 3), ('SUPER_ADMIN', 4), ('SUPER_ADMIN', 5), ('SUPER_ADMIN', 11);
 
 -- 初始化超级管理员按钮权限
 INSERT INTO sys_role_button (role, button_id) VALUES
 ('SUPER_ADMIN', 1), ('SUPER_ADMIN', 2), ('SUPER_ADMIN', 3), ('SUPER_ADMIN', 4), ('SUPER_ADMIN', 5);
 
--- 初始化区域管理员权限（默认：首页、取号、大屏、窗口，不含管理菜单）
+-- 初始化区域管理员权限（默认：首页、取号、大屏、窗口、管理菜单，含统计分析）
 INSERT INTO sys_role_menu (role, menu_id) VALUES
-('REGION_ADMIN', 1), ('REGION_ADMIN', 2), ('REGION_ADMIN', 3), ('REGION_ADMIN', 4);
+('REGION_ADMIN', 1), ('REGION_ADMIN', 2), ('REGION_ADMIN', 3), ('REGION_ADMIN', 4), ('REGION_ADMIN', 5), ('REGION_ADMIN', 11);
 
 INSERT INTO sys_role_button (role, button_id) VALUES
 ('REGION_ADMIN', 1), ('REGION_ADMIN', 2), ('REGION_ADMIN', 3), ('REGION_ADMIN', 4), ('REGION_ADMIN', 5);

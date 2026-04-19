@@ -101,19 +101,12 @@
     </aside>
 
     <main class="content">
-      <!-- Top navigation bar -->
       <div class="top-nav">
         <div class="top-nav-left">
-          <!-- Sidebar toggle button -->
-          <button class="nav-toggle" @click="sidebarCollapsed = !sidebarCollapsed" :title="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'">
-            ☰
-          </button>
-          <!-- Breadcrumb navigation -->
-          <nav class="breadcrumb">
-            <span class="breadcrumb-parent">{{ currentParentLabel }}</span>
-            <span class="breadcrumb-sep">/</span>
-            <span class="breadcrumb-current">{{ currentMenuLabel }}</span>
-          </nav>
+          <div class="topbar-brand">
+            <img src="/favicon.png" class="topbar-logo" alt="QMS" />
+            <span class="topbar-title">排队叫号管理系统</span>
+          </div>
         </div>
         <div class="header-right">
           <div class="user-info">
@@ -132,19 +125,36 @@
               <span class="user-name">{{ userStore.name || userStore.username }}</span>
             </span>
           </div>
-          <el-button type="danger" plain size="small" @click="handleLogout" class="logout-btn">
-            <el-icon class="btn-i"><SwitchButton /></el-icon> 退出
+          <el-button plain size="small" @click="handleLogout" class="logout-btn">
+            <el-icon class="btn-i"><SwitchButton /></el-icon>退出
           </el-button>
         </div>
       </div>
       <div class="content-body">
-        <DashboardPanel v-if="activeKey === 'dashboard'" />
-        <RegionPanel v-if="activeKey === 'region'" />
-        <BusinessTypePanel v-if="activeKey === 'biz'" />
-        <CounterPanel v-if="activeKey === 'counters'" />
-        <QrCodePanel v-if="activeKey === 'qrcode'" />
-        <UserPanel v-if="activeKey === 'users'" />
-        <MenuPanel v-if="activeKey === 'menu'" @reload="loadMenus" />
+        <div class="content-header-card">
+          <div class="content-header-left">
+            <button class="nav-toggle" @click="sidebarCollapsed = !sidebarCollapsed" :title="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'">☰</button>
+            <div class="content-title-group">
+              <nav class="breadcrumb">
+                <span class="breadcrumb-parent">{{ currentParentLabel }}</span>
+                <span class="breadcrumb-sep">/</span>
+                <span class="breadcrumb-current">{{ currentMenuLabel }}</span>
+              </nav>
+              <h2 class="content-title">{{ currentMenuLabel || '管理后台' }}</h2>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-host">
+          <DashboardPanel v-if="activeKey === 'dashboard'" />
+          <RegionPanel v-if="activeKey === 'region'" />
+          <BusinessTypePanel v-if="activeKey === 'biz'" />
+          <CounterPanel v-if="activeKey === 'counters'" />
+          <QrCodePanel v-if="activeKey === 'qrcode'" />
+          <UserPanel v-if="activeKey === 'users'" />
+          <MenuPanel v-if="activeKey === 'menu'" @reload="loadMenus" />
+          <StatisticsPanel v-if="activeKey === 'statistics'" />
+        </div>
       </div>
     </main>
 
@@ -189,6 +199,7 @@ import CounterPanel from '../components/admin/CounterPanel.vue'
 import QrCodePanel from '../components/admin/QrCodePanel.vue'
 import UserPanel from '../components/admin/UserPanel.vue'
 import MenuPanel from '../components/admin/MenuPanel.vue'
+import StatisticsPanel from '../components/admin/StatisticsPanel.vue'
 import ContextMenu from '../components/ContextMenu.vue'
 
 const router = useRouter()
@@ -343,6 +354,7 @@ function menuKeyFromPath(path) {
     '/admin?tab=qrcode': 'qrcode',
     '/admin?tab=users': 'users',
     '/admin?tab=menu': 'menu',
+    '/admin?tab=statistics': 'statistics',
     '/counter': 'counter',
     '/display': 'display'
   }
@@ -828,21 +840,18 @@ onUnmounted(() => {
 
 <style scoped>
 /* ═══════════════════════════════════════════════════════════════
-   Layout
+   Layout — Claude warm light theme for content area
    ═══════════════════════════════════════════════════════════════ */
 .admin-layout {
   display: flex;
   height: 100vh;
-  background: var(--bg-void);
+  background: var(--bg-body);
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   Sidebar - Dark style matching reference
-   ═══════════════════════════════════════════════════════════════ */
 .sidebar {
-  width: 240px;
-  background: #1a1d2e;
-  border-right: 1px solid var(--border);
+  width: 200px;
+  background: var(--bg-sidebar);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
   display: flex;
   flex-direction: column;
   transition: width var(--duration-normal) var(--ease-out);
@@ -853,28 +862,27 @@ onUnmounted(() => {
   width: 64px;
 }
 
-/* Brand logo area */
 .sidebar-brand {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-5) var(--sp-5);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  min-height: 64px;
+  padding: 0 var(--sp-4);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  min-height: 48px;
 }
 
 .brand-logo {
-  height: 32px;
+  height: 24px;
   width: auto;
   flex-shrink: 0;
 }
 
 .brand-text {
-  font-size: var(--text-base);
-  font-weight: 700;
-  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: #ffffff;
   white-space: nowrap;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -897,25 +905,25 @@ onUnmounted(() => {
 .menu-item {
   display: flex;
   align-items: center;
-  padding: 0 var(--sp-5);
+  padding: 0 var(--sp-4);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--text-sidebar);
   gap: var(--sp-3);
-  min-height: 44px;
+  min-height: 40px;
   position: relative;
   user-select: none;
   font-size: var(--text-sm);
 }
 
 .menu-item:hover {
-  color: rgba(255, 255, 255, 0.9);
-  background: rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .menu-item.active {
-  color: #fff;
-  background: rgba(0, 229, 255, 0.12);
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .menu-item.active::before {
@@ -925,8 +933,8 @@ onUnmounted(() => {
   top: 50%;
   transform: translateY(-50%);
   width: 3px;
-  height: 24px;
-  background: var(--accent);
+  height: 20px;
+  background: var(--primary);
   border-radius: 0 2px 2px 0;
 }
 
@@ -943,7 +951,7 @@ onUnmounted(() => {
   line-height: 1;
   width: 20px;
   text-align: center;
-  color: var(--text-primary, #303133);
+  color: currentColor;
 }
 
 .menu-child-icon-comp {
@@ -951,8 +959,8 @@ onUnmounted(() => {
   line-height: 1;
   width: 20px;
   text-align: center;
-  color: var(--text-secondary, #606266);
-  opacity: 0.7;
+  color: currentColor;
+  opacity: 0.82;
 }
 
 .menu-label {
@@ -965,7 +973,7 @@ onUnmounted(() => {
 
 .menu-arrow {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--text-sidebar-muted);
   flex-shrink: 0;
   transition: transform var(--duration-fast) var(--ease-out);
 }
@@ -978,7 +986,7 @@ onUnmounted(() => {
 /* 分组拖拽手柄 */
 .menu-group-drag {
   cursor: grab;
-  opacity: 0.3;
+  opacity: 0.38;
   font-size: 14px;
   flex-shrink: 0;
   transition: opacity var(--duration-fast) var(--ease-out);
@@ -986,7 +994,7 @@ onUnmounted(() => {
 }
 
 .menu-group-header:hover .menu-group-drag {
-  opacity: 0.7;
+  opacity: 0.76;
 }
 
 .menu-group-drag:active {
@@ -996,19 +1004,19 @@ onUnmounted(() => {
 .menu-group-header {
   display: flex;
   align-items: center;
-  padding: 0 var(--sp-5);
+  padding: 0 var(--sp-4);
   cursor: pointer;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--text-sidebar);
   gap: var(--sp-3);
-  min-height: 44px;
+  min-height: 40px;
   user-select: none;
   transition: all var(--duration-fast) var(--ease-out);
   font-size: var(--text-sm);
 }
 
 .menu-group-header:hover {
-  color: rgba(255, 255, 255, 0.9);
-  background: rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .menu-group-header .menu-icon {
@@ -1023,30 +1031,27 @@ onUnmounted(() => {
   margin-left: auto;
 }
 
-/* ── Child items (submenu) ── */
 .menu-child {
-  padding-left: var(--sp-5);
-  min-height: 44px;
-  color: rgba(255, 255, 255, 0.45);
+  padding-left: var(--sp-4);
+  min-height: 38px;
+  color: var(--text-sidebar-muted);
   font-size: var(--text-sm);
-  /* 二级菜单额外缩进：一个图标宽度 + 间距，与一级菜单区分 */
   margin-left: calc(20px + var(--sp-3));
 }
 
 .menu-child:hover {
-  color: rgba(255, 255, 255, 0.85);
+  color: #ffffff;
 }
 
 .menu-child.active {
-  color: #fff;
-  background: rgba(0, 229, 255, 0.1);
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .menu-child.active::before {
-  height: 18px;
+  height: 16px;
 }
 
-/* 子菜单图标占位：与一级菜单相同大小 */
 .menu-child-icon {
   font-size: 18px;
   flex-shrink: 0;
@@ -1061,21 +1066,18 @@ onUnmounted(() => {
   opacity: 1;
 }
 
-/* 子菜单文字缩进：通过 margin-left 区分层级 */
 .menu-child .menu-label {
   font-weight: 400;
   margin-left: var(--sp-3);
 }
 
-/* Non-group child list (普通菜单的子级) */
 .menu-child-list {
-  background: rgba(0, 0, 0, 0.15);
+  background: rgba(0, 0, 0, 0.12);
 }
 
-/* 分组子菜单容器：提供拖拽放置区域 */
 .menu-group-children {
-  background: rgba(0, 0, 0, 0.15);
-  min-height: 44px;
+  background: rgba(0, 0, 0, 0.12);
+  min-height: 40px;
   padding: 4px 0;
 }
 
@@ -1109,7 +1111,7 @@ onUnmounted(() => {
    ═══════════════════════════════════════════════════════════════ */
 .menu-ghost {
   opacity: 0.5;
-  background: rgba(0, 229, 255, 0.15);
+  background: var(--primary-light);
   border-radius: var(--radius-sm);
 }
 
@@ -1132,18 +1134,17 @@ onUnmounted(() => {
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
-  background: var(--bg-void);
+  background: var(--bg-body);
 }
 
 .top-nav {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 var(--sp-8);
-  min-height: 56px;
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
+  padding: 0 var(--sp-6);
+  min-height: 48px;
+  background: var(--bg-topbar);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   gap: var(--sp-3);
 }
 
@@ -1153,14 +1154,31 @@ onUnmounted(() => {
   gap: var(--sp-4);
 }
 
-/* Sidebar toggle */
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.topbar-logo {
+  width: 24px;
+  height: 24px;
+}
+
+.topbar-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: #ffffff;
+  letter-spacing: 0.04em;
+}
+
 .nav-toggle {
-  background: transparent;
-  border: 1px solid var(--border);
+  background: #fff;
+  border: 1px solid var(--border-input);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 4px 10px;
   font-size: 16px;
   line-height: 1;
   transition: all var(--duration-fast) var(--ease-out);
@@ -1171,12 +1189,11 @@ onUnmounted(() => {
 }
 
 .nav-toggle:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-glow);
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-light);
 }
 
-/* Breadcrumb */
 .breadcrumb {
   display: flex;
   align-items: center;
@@ -1184,53 +1201,27 @@ onUnmounted(() => {
   font-size: var(--text-sm);
 }
 
-.breadcrumb-parent {
-  color: var(--text-secondary);
-  cursor: default;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.breadcrumb-parent::after {
-  content: '?';
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 1px solid var(--border-hi);
-  font-size: 10px;
-  color: var(--text-muted);
-  cursor: help;
-}
-
+.breadcrumb-parent,
 .breadcrumb-sep {
-  color: var(--text-muted);
-  margin: 0 2px;
+  color: var(--text-secondary);
 }
 
 .breadcrumb-current {
   color: var(--text-primary);
-  font-weight: 700;
+  font-weight: 600;
 }
 
-/* Header right */
 .header-right {
   display: flex;
   align-items: center;
-  gap: var(--sp-4);
+  gap: var(--sp-3);
 }
 
 .user-info {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-4);
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  color: rgba(255, 255, 255, 0.88);
 }
 
 .user-item {
@@ -1239,61 +1230,85 @@ onUnmounted(() => {
   gap: var(--sp-1);
 }
 
-.info-icon {
-  font-size: 14px;
-  color: var(--text-muted);
+.info-icon,
+.user-region,
+.user-name {
+  color: rgba(255, 255, 255, 0.78);
 }
 
 .info-divider {
   height: 16px;
   margin: 0;
-  border-color: var(--border);
-}
-
-.user-region {
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
+  border-color: rgba(255, 255, 255, 0.14);
 }
 
 .user-role {
   font-size: var(--text-xs);
-  color: var(--accent);
-  background: var(--accent-glow);
+  color: #ffffff;
+  background: rgba(0, 82, 217, 0.24);
   padding: 2px var(--sp-2);
   border-radius: var(--radius-sm);
 }
 
-.user-name {
-  font-size: var(--text-sm);
+.logout-btn {
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  background: transparent !important;
+  color: rgba(255, 255, 255, 0.88) !important;
+}
+
+.logout-btn:hover {
+  border-color: #ffffff !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #ffffff !important;
+}
+
+.content-body {
+  flex: 1;
+  padding: var(--sp-6);
+  overflow-y: auto;
+}
+
+.content-header-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-6);
+  padding: var(--sp-5) var(--sp-6);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.content-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.content-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.content-title {
+  font-size: var(--text-2xl);
   font-weight: 600;
   color: var(--text-primary);
 }
 
-.logout-btn {
-  transition: all 0.15s;
+.panel-host {
+  min-height: calc(100% - 88px);
 }
 
-.logout-btn:hover {
-  transform: translateY(-1px);
-}
-
-/* Content body */
-.content-body {
-  flex: 1;
-  padding: var(--sp-6) var(--sp-8);
-  overflow-y: auto;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   Mobile bottom tab bar
-   ═══════════════════════════════════════════════════════════════ */
 .mobile-tab-bar {
   display: none;
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  background: var(--bg-panel);
+  background: #ffffff;
   border-top: 1px solid var(--border);
   padding: var(--sp-1) var(--sp-2);
   z-index: 100;
@@ -1317,8 +1332,8 @@ onUnmounted(() => {
 }
 
 .mobile-tab.active {
-  color: var(--accent);
-  background: var(--accent-glow);
+  color: var(--primary);
+  background: var(--primary-light);
 }
 
 .mobile-tab-icon {
@@ -1335,78 +1350,81 @@ onUnmounted(() => {
    RESPONSIVE: Tablet Landscape (≤1024px)
    ═══════════════════════════════════════════════════════════════ */
 @media (max-width: 1024px) {
-  .top-nav { padding: 0 var(--sp-6); }
-  .content-body { padding: var(--sp-5) var(--sp-6); }
+  .top-nav { padding: 0 var(--sp-4); }
+  .content-body { padding: var(--sp-5); }
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   RESPONSIVE: Tablet Portrait (≤768px)
-   ═══════════════════════════════════════════════════════════════ */
 @media (max-width: 768px) {
   .top-nav {
     padding: var(--sp-3) var(--sp-4);
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .content-body {
-    padding: var(--sp-4);
+    flex-wrap: wrap;
+    min-height: auto;
   }
 
   .header-right {
     width: 100%;
-    justify-content: flex-end;
+    justify-content: space-between;
+  }
+
+  .content-body {
+    padding: var(--sp-4);
+    padding-bottom: calc(var(--sp-16) + var(--sp-4));
+  }
+
+  .content-header-card {
+    padding: var(--sp-4);
   }
 
   .mobile-tab-bar {
     display: flex;
   }
-
-  .content-body {
-    padding-bottom: calc(var(--sp-16) + var(--sp-4));
-  }
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   RESPONSIVE: Mobile (≤480px)
-   ═══════════════════════════════════════════════════════════════ */
 @media (max-width: 480px) {
   .sidebar {
     width: 56px;
   }
 
   .sidebar-brand {
-    padding: var(--sp-4);
-    min-height: 56px;
+    padding: 0 var(--sp-3);
     justify-content: center;
   }
 
   .brand-logo {
-    height: 28px;
+    height: 22px;
   }
 
-  .menu-item {
-    padding: var(--sp-3);
+  .menu-item,
+  .menu-group-header {
+    padding: 0 var(--sp-3);
     justify-content: center;
   }
 
-  .menu-item.active {
-    border-right: none;
-    border-left: 3px solid var(--accent);
-  }
-
   .menu-item.active::before {
+    left: 0;
+  }
+
+  .menu-label,
+  .menu-arrow,
+  .menu-child-icon,
+  .brand-text,
+  .topbar-title,
+  .user-region,
+  .user-name {
     display: none;
   }
 
-  .menu-label, .menu-arrow, .menu-child-icon {
-    display: none;
+  .content-header-left {
+    width: 100%;
+    align-items: flex-start;
   }
 
-  .top-nav { padding: var(--sp-3); }
+  .content-title {
+    font-size: var(--text-xl);
+  }
 
-  .breadcrumb { font-size: var(--text-xs); }
-
-  .user-name { display: none; }
+  .breadcrumb {
+    font-size: var(--text-xs);
+  }
 }
 </style>
