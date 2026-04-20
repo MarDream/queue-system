@@ -449,3 +449,91 @@ INSERT INTO sys_role_menu (role, menu_id) VALUES
 
 INSERT INTO sys_role_button (role, button_id) VALUES
 ('REGION_ADMIN', 1), ('REGION_ADMIN', 2), ('REGION_ADMIN', 3), ('REGION_ADMIN', 4), ('REGION_ADMIN', 5);
+
+SET @max_menu_id = (SELECT COALESCE(MAX(id), 0) FROM sys_menu);
+
+-- 添加统计分析菜单（作为管理分组下的子菜单）
+INSERT INTO sys_menu (name, path, icon, sort_order, parent_id, type)
+SELECT '统计分析', '/admin?tab=statistics', 'DataAnalysis', 8, id, 'menu'
+FROM sys_menu WHERE path = '/admin' AND parent_id IS NULL;
+
+-- 为统计分析菜单添加按钮权限
+INSERT INTO sys_button (menu_id, name, code, sort_order)
+SELECT m.id, '导出', 'btn:export', 1
+FROM sys_menu m WHERE m.path = '/admin?tab=statistics'
+ON DUPLICATE KEY UPDATE name = VALUES(name);
+
+INSERT INTO sys_button (menu_id, name, code, sort_order)
+SELECT m.id, '刷新', 'btn:refresh', 2
+FROM sys_menu m WHERE m.path = '/admin?tab=statistics'
+ON DUPLICATE KEY UPDATE name = VALUES(name);
+
+-- 为超级管理员添加菜单权限
+INSERT INTO sys_role_menu (role, menu_id)
+SELECT 'SUPER_ADMIN', m.id
+FROM sys_menu m WHERE m.path = '/admin?tab=statistics'
+ON DUPLICATE KEY UPDATE role = role;
+
+-- 为区域管理员添加菜单权限
+INSERT INTO sys_role_menu (role, menu_id)
+SELECT 'REGION_ADMIN', m.id
+FROM sys_menu m WHERE m.path = '/admin?tab=statistics'
+ON DUPLICATE KEY UPDATE role = role;
+
+-- 为统计分析菜单的按钮添加超级管理员权限
+INSERT INTO sys_role_button (role, button_id)
+SELECT 'SUPER_ADMIN', b.id
+FROM sys_button b
+JOIN sys_menu m ON b.menu_id = m.id
+WHERE m.path = '/admin?tab=statistics'
+ON DUPLICATE KEY UPDATE role = role;
+
+-- 为统计分析菜单的按钮添加区域管理员权限
+INSERT INTO sys_role_button (role, button_id)
+SELECT 'REGION_ADMIN', b.id
+FROM sys_button b
+JOIN sys_menu m ON b.menu_id = m.id
+WHERE m.path = '/admin?tab=statistics'
+ON DUPLICATE KEY UPDATE role = role;
+
+-- ========================================
+-- 修复脚本：确保所有菜单都在超级管理员角色权限中
+-- 如果有新菜单没有加入权限，运行此脚本
+-- ========================================
+INSERT IGNORE INTO sys_role_menu (role, menu_id)
+SELECT 'SUPER_ADMIN', m.id FROM sys_menu m
+WHERE NOT EXISTS (
+    SELECT 1 FROM sys_role_menu rm WHERE rm.role = 'SUPER_ADMIN' AND rm.menu_id = m.id
+);
+
+-- ========================================
+-- 修复脚本：初始化角色按钮数据（确保 sys_role_button 有数据）
+-- 如果按钮权限为空，运行此脚本
+-- ========================================
+DELETE FROM sys_role_button;
+
+-- 超级管理员：拥有所有按钮
+INSERT INTO sys_role_button (role, button_id)
+SELECT 'SUPER_ADMIN', id FROM sys_button;
+
+-- 区域管理员：拥有所有按钮（细粒度控制在用户级）
+INSERT INTO sys_role_button (role, button_id)
+SELECT 'REGION_ADMIN', id FROM sys_button;
+
+-- 窗口操作员：只有叫号台相关按钮
+INSERT INTO sys_role_button (role, button_id)
+SELECT 'WINDOW_OPERATOR', id FROM sys_button
+WHERE menu_id = (SELECT id FROM sys_menu WHERE path = '/counter');
+
+-- 修复脚本：确保统计分析菜单的按钮也有权限
+INSERT IGNORE INTO sys_role_button (role, button_id)
+SELECT 'SUPER_ADMIN', b.id
+FROM sys_button b
+JOIN sys_menu m ON b.menu_id = m.id
+WHERE m.path = '/admin?tab=statistics';
+
+INSERT IGNORE INTO sys_role_button (role, button_id)
+SELECT 'REGION_ADMIN', b.id
+FROM sys_button b
+JOIN sys_menu m ON b.menu_id = m.id
+WHERE m.path = '/admin?tab=statistics';

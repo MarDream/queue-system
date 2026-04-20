@@ -263,4 +263,37 @@ public class SysMenuServiceImpl implements SysMenuService {
     public SysMenu getById(Long id) {
         return sysMenuMapper.selectById(id);
     }
+
+    /**
+     * 修复：确保指定菜单添加到超级管理员角色权限
+     * 用于数据库初始化后补充缺失的权限关联
+     */
+    @Transactional
+    public void ensureSuperAdminHasMenu(Long menuId) {
+        List<Long> existingMenus = sysRoleMenuMapper.selectMenuIdsByRole("SUPER_ADMIN");
+        if (existingMenus == null || !existingMenus.contains(menuId)) {
+            sysRoleMenuMapper.insertRoleMenu("SUPER_ADMIN", menuId);
+        }
+    }
+
+    /**
+     * 修复：确保所有菜单都在超级管理员角色权限中
+     * 用于修复历史遗留的权限缺失问题
+     */
+    @Transactional
+    public void syncSuperAdminMenus() {
+        List<SysMenu> allMenus = sysMenuMapper.selectList(
+            new LambdaQueryWrapper<SysMenu>()
+                .eq(SysMenu::getDeleted, 0)
+        );
+        List<Long> existingMenus = sysRoleMenuMapper.selectMenuIdsByRole("SUPER_ADMIN");
+        if (existingMenus == null) {
+            existingMenus = List.of();
+        }
+        for (SysMenu menu : allMenus) {
+            if (!existingMenus.contains(menu.getId())) {
+                sysRoleMenuMapper.insertRoleMenu("SUPER_ADMIN", menu.getId());
+            }
+        }
+    }
 }

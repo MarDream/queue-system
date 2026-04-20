@@ -98,10 +98,19 @@ public class SysUserController {
         return Result.ok(sysUserService.getAvailableMenusForOperator(operatorId));
     }
 
-    // 获取当前操作者可授权的按钮列表
-    @GetMapping("/available-buttons")
-    public Result<List<SysButton>> getAvailableButtons(jakarta.servlet.http.HttpServletRequest request) {
+    // 获取面向目标用户角色后可授权的菜单列表
+    @GetMapping("/{id}/available-menus")
+    public Result<List<SysMenu>> getAvailableMenusForTarget(@PathVariable Long id,
+                                                            jakarta.servlet.http.HttpServletRequest request) {
         Long operatorId = (Long) request.getAttribute("userId");
-        return Result.ok(sysUserService.getAvailableButtonsForOperator(operatorId));
+        return Result.ok(sysUserService.getAvailableMenusForTargetUser(operatorId, id));
+    }
+
+    // 获取面向目标用户角色后可授权的按钮列表
+    @GetMapping("/{id}/available-buttons")
+    public Result<List<SysButton>> getAvailableButtonsForTarget(@PathVariable Long id,
+                                                                jakarta.servlet.http.HttpServletRequest request) {
+        Long operatorId = (Long) request.getAttribute("userId");
+        return Result.ok(sysUserService.getAvailableButtonsForTargetUser(operatorId, id));
     }
 }

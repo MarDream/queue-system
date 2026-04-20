@@ -18,4 +18,8 @@ public class StatisticsRequest {
     private Integer pageNum = 1;
     private Integer pageSize = 10;
     private List<String> fields;
+    private String sortProp;
+    private String sortOrder;
+    // 用户可见区域ID列表（用于权限过滤）
+    private List<Long> allowedRegionIds;
 }

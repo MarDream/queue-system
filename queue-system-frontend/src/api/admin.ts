@@ -131,6 +131,8 @@ export const statisticsApi = {
     endDate?: string;
     pageNum?: number;
     pageSize?: number;
+    sortProp?: string;
+    sortOrder?: string;
   }) => request.get('/admin/statistics/list', { params }),
 
   export: (params?: {
@@ -159,11 +161,38 @@ export const userPermissionApi = {
   set: (userId: number, data: { menuIds?: number[]; buttonIds?: number[] }) =>
     request.put(`/admin/users/${userId}/permissions`, data),
 
-  // 获取当前操作者可授权的菜单
-  getAvailableMenus: () =>
-    request.get<SysMenu[]>('/admin/users/available-menus'),
+  // 获取面向目标用户角色后可授权的菜单
+  getAvailableMenus: (userId: number) =>
+    request.get<SysMenu[]>(`/admin/users/${userId}/available-menus`),
 
-  // 获取当前操作者可授权的按钮
-  getAvailableButtons: () =>
-    request.get<SysButton[]>('/admin/users/available-buttons')
+  // 获取面向目标用户角色后可授权的按钮
+  getAvailableButtons: (userId: number) =>
+    request.get<SysButton[]>(`/admin/users/${userId}/available-buttons`)
+}
+
+// 角色权限 API
+export const rolePermissionApi = {
+  // 获取所有角色
+  listRoles: () =>
+    request.get('/admin/roles'),
+
+  // 获取所有菜单
+  listMenus: () =>
+    request.get('/admin/roles/menus'),
+
+  // 获取角色的菜单权限
+  getRoleMenus: (role: string) =>
+    request.get(`/admin/roles/${role}/menus`),
+
+  // 获取角色的按钮权限
+  getRoleButtons: (role: string) =>
+    request.get(`/admin/roles/${role}/buttons`),
+
+  // 获取所有按钮
+  listAllButtons: () =>
+    request.get('/admin/roles/buttons'),
+
+  // 更新角色完整权限
+  updatePermissions: (role: string, data: { menuIds: number[]; buttonIds: number[] }) =>
+    request.put(`/admin/roles/${role}/permissions`, data)
 }

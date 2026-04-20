@@ -592,37 +592,30 @@ async function openPermissionDialog(row) {
   permTarget.value = row
   permDialogVisible.value = true
 
-  // 加载操作者可授权的菜单和按钮
   try {
-    const [menus, buttons] = await Promise.all([
-      userPermissionApi.getAvailableMenus(),
-      userPermissionApi.getAvailableButtons()
+    const [menus, buttons, perm] = await Promise.all([
+      userPermissionApi.getAvailableMenus(row.id),
+      userPermissionApi.getAvailableButtons(row.id),
+      userPermissionApi.get(row.id)
     ])
     availableMenus.value = menus || []
     availableButtons.value = buttons || []
+
+    const hasUserPermissionConfig = perm?.menuIds != null || perm?.buttonIds != null
+    if (hasUserPermissionConfig) {
+      permForm.value = {
+        menuIds: perm.menuIds || [],
+        buttonIds: perm.buttonIds || []
+      }
+    } else {
+      permForm.value = {
+        menuIds: availableMenus.value.map(menu => menu.id),
+        buttonIds: availableButtons.value.map(button => button.id)
+      }
+    }
   } catch {
     availableMenus.value = []
     availableButtons.value = []
-  }
-
-  // 加载目标用户当前的权限配置
-  try {
-    const perm = await userPermissionApi.get(row.id)
-    const menuIds = perm.menuIds || []
-    const buttonIds = perm.buttonIds || []
-    // 区域管理员未配置过权限时，默认勾选首页、取号、大屏、窗口（不含管理菜单）
-    if (menuIds.length === 0 && buttonIds.length === 0 && row.role === 'REGION_ADMIN') {
-      const defaultMenuIds = availableMenus.value
-        .filter(m => ['/home', '/kiosk', '/display', '/counter'].includes(m.path))
-        .map(m => m.id)
-      const defaultButtonIds = availableButtons.value
-        .filter(b => defaultMenuIds.includes(b.menuId))
-        .map(b => b.id)
-      permForm.value = { menuIds: defaultMenuIds, buttonIds: defaultButtonIds }
-    } else {
-      permForm.value = { menuIds, buttonIds }
-    }
-  } catch {
     permForm.value = { menuIds: [], buttonIds: [] }
   }
 }

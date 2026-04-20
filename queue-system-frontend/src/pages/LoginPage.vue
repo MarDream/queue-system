@@ -91,6 +91,17 @@ async function handleLogin() {
     }
   })
 }
+
+// 监听用户活动事件
+function recordActivity() {
+  userStore.recordActivity()
+}
+
+// 添加活动监听器
+const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click']
+events.forEach(event => {
+  document.addEventListener(event, recordActivity, { passive: true })
+})
 </script>
 
 <style scoped>

@@ -32,4 +32,6 @@ public interface SysUserService {
     UserPermissionDTO getUserPermissions(Long userId);
     List<SysMenu> getAvailableMenusForOperator(Long operatorId);
     List<SysButton> getAvailableButtonsForOperator(Long operatorId);
+    List<SysMenu> getAvailableMenusForTargetUser(Long operatorId, Long targetUserId);
+    List<SysButton> getAvailableButtonsForTargetUser(Long operatorId, Long targetUserId);
 }

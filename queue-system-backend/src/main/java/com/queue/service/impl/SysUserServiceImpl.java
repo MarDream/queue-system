@@ -31,7 +31,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -427,42 +429,61 @@ public class SysUserServiceImpl implements SysUserService {
         }
     }
 
+
+    private List<Long> intersectIds(List<Long> left, List<Long> right) {
+        if (left == null || right == null || left.isEmpty() || right.isEmpty()) {
+            return new ArrayList<>();
+        }
+        Set<Long> rightSet = new HashSet<>(right);
+        return left.stream().filter(rightSet::contains).collect(Collectors.toList());
+    }
+
+    private List<Long> getAssignableMenuIds(SysUser operator, SysUser target) {
+        List<Long> targetRoleMenuIds = sysPermissionMapper.selectMenuIdsByRole(target.getRole());
+        List<Long> operatorRoleMenuIds = sysPermissionMapper.selectMenuIdsByRole(operator.getRole());
+        return intersectIds(operatorRoleMenuIds, targetRoleMenuIds);
+    }
+
+    private List<Long> getAssignableButtonIds(SysUser operator, SysUser target) {
+        List<Long> targetRoleButtonIds = sysPermissionMapper.selectButtonIdsByRole(target.getRole());
+        List<Long> operatorRoleButtonIds = sysPermissionMapper.selectButtonIdsByRole(operator.getRole());
+        return intersectIds(operatorRoleButtonIds, targetRoleButtonIds);
+    }
+
     /**
      * 校验操作者的权限是否合法
      */
     private void validatePermission(SysUser operator, SysUser target, UserPermissionDTO dto) {
-        if ("SUPER_ADMIN".equals(operator.getRole())) {
-            // 超级管理员可以配置任何人
-            return;
+        if (operator == null) {
+            throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "请先登录");
         }
 
-        if ("REGION_ADMIN".equals(operator.getRole())) {
-            // 区域管理员只能配置窗口操作员
-            if (!"WINDOW_OPERATOR".equals(target.getRole())) {
-                throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "只能为窗口操作员分配权限");
-            }
-            // 区域管理员不能超出自身权限范围
-            List<Long> operatorMenuIds = getMenuIdsForUser(operator.getId(), operator.getRole());
-            List<Long> operatorButtonIds = getButtonIdsForUser(operator.getId(), operator.getRole());
-            if (dto.getMenuIds() != null) {
-                for (Long menuId : dto.getMenuIds()) {
-                    if (!operatorMenuIds.contains(menuId)) {
-                        throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "无权分配该菜单权限");
-                    }
-                }
-            }
-            if (dto.getButtonIds() != null) {
-                for (Long buttonId : dto.getButtonIds()) {
-                    if (!operatorButtonIds.contains(buttonId)) {
-                        throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "无权分配该按钮权限");
-                    }
-                }
-            }
-            return;
+        if ("REGION_ADMIN".equals(operator.getRole()) && !"WINDOW_OPERATOR".equals(target.getRole())) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "只能为窗口操作员分配权限");
         }
 
-        throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "无权限操作");
+        if (!"SUPER_ADMIN".equals(operator.getRole()) && !"REGION_ADMIN".equals(operator.getRole())) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "无权限操作");
+        }
+
+        List<Long> assignableMenuIds = getAssignableMenuIds(operator, target);
+        List<Long> assignableButtonIds = getAssignableButtonIds(operator, target);
+        if (dto.getMenuIds() != null) {
+            for (Long menuId : dto.getMenuIds()) {
+                if (!assignableMenuIds.contains(menuId)) {
+                    throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "无权分配该菜单权限");
+                }
+            }
+        }
+        if (dto.getButtonIds() != null) {
+            for (Long buttonId : dto.getButtonIds()) {
+                if (!assignableButtonIds.contains(buttonId)) {
+                    throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "无权分配该按钮权限");
+                }
+            }
+        }
     }
+
 
     /**
      * 获取用户实际拥有的菜单ID（用户级 > 角色级）
@@ -503,9 +524,14 @@ public class SysUserServiceImpl implements SysUserService {
         dto.setUserId(userId);
         List<Long> menuIds = sysUserMenuMapper.selectMenuIdsByUserId(userId);
         List<Long> buttonIds = sysUserButtonMapper.selectButtonIdsByUserId(userId);
-        // 过滤掉配置标记（id=0）
-        dto.setMenuIds(menuIds != null ? menuIds.stream().filter(id -> id != 0L).collect(java.util.stream.Collectors.toList()) : null);
-        dto.setButtonIds(buttonIds != null ? buttonIds.stream().filter(id -> id != 0L).collect(java.util.stream.Collectors.toList()) : null);
+        boolean menuConfigured = menuIds != null && !menuIds.isEmpty();
+        boolean buttonConfigured = buttonIds != null && !buttonIds.isEmpty();
+        dto.setMenuIds(menuConfigured
+            ? menuIds.stream().filter(id -> id != 0L).collect(java.util.stream.Collectors.toList())
+            : null);
+        dto.setButtonIds(buttonConfigured
+            ? buttonIds.stream().filter(id -> id != 0L).collect(java.util.stream.Collectors.toList())
+            : null);
         return dto;
     }
 
@@ -534,6 +560,56 @@ public class SysUserServiceImpl implements SysUserService {
             return new ArrayList<>();
         }
         List<Long> buttonIds = getButtonIdsForUser(operatorId, operator.getRole());
+        if (buttonIds.isEmpty()) {
+            return new ArrayList<>();
+        }
+        return sysButtonMapper.selectList(
+            new LambdaQueryWrapper<SysButton>()
+                .in(SysButton::getId, buttonIds)
+                .eq(SysButton::getDeleted, 0)
+                .orderByAsc(SysButton::getSortOrder)
+        );
+    }
+
+    @Override
+    public List<SysMenu> getAvailableMenusForTargetUser(Long operatorId, Long targetUserId) {
+        SysUser operator = sysUserMapper.selectById(operatorId);
+        SysUser target = sysUserMapper.selectById(targetUserId);
+        if (operator == null || target == null) {
+            return new ArrayList<>();
+        }
+        if ("REGION_ADMIN".equals(operator.getRole()) && !"WINDOW_OPERATOR".equals(target.getRole())) {
+            return new ArrayList<>();
+        }
+        if (!"SUPER_ADMIN".equals(operator.getRole()) && !"REGION_ADMIN".equals(operator.getRole())) {
+            return new ArrayList<>();
+        }
+        List<Long> menuIds = getAssignableMenuIds(operator, target);
+        if (menuIds.isEmpty()) {
+            return new ArrayList<>();
+        }
+        return sysMenuMapper.selectList(
+            new LambdaQueryWrapper<SysMenu>()
+                .in(SysMenu::getId, menuIds)
+                .eq(SysMenu::getDeleted, 0)
+                .orderByAsc(SysMenu::getSortOrder)
+        );
+    }
+
+    @Override
+    public List<SysButton> getAvailableButtonsForTargetUser(Long operatorId, Long targetUserId) {
+        SysUser operator = sysUserMapper.selectById(operatorId);
+        SysUser target = sysUserMapper.selectById(targetUserId);
+        if (operator == null || target == null) {
+            return new ArrayList<>();
+        }
+        if ("REGION_ADMIN".equals(operator.getRole()) && !"WINDOW_OPERATOR".equals(target.getRole())) {
+            return new ArrayList<>();
+        }
+        if (!"SUPER_ADMIN".equals(operator.getRole()) && !"REGION_ADMIN".equals(operator.getRole())) {
+            return new ArrayList<>();
+        }
+        List<Long> buttonIds = getAssignableButtonIds(operator, target);
         if (buttonIds.isEmpty()) {
             return new ArrayList<>();
         }

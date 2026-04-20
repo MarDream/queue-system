@@ -1,5 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { ElMessage } from 'element-plus'
+import router from '../router'
+
+const SESSION_TIMEOUT_MS = 60 * 60 * 1000 // 1小时
+const SESSION_CHECK_INTERVAL_MS = 60 * 1000 // 每分钟检测一次
+const SESSION_ACTIVITY_KEY = 'lastActivityTime'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref(localStorage.getItem('token') || '')
@@ -12,6 +18,8 @@ export const useUserStore = defineStore('user', () => {
   const regionName = ref(localStorage.getItem('regionName') || '')
   const menuPaths = ref(JSON.parse(localStorage.getItem('menuPaths') || '[]'))
   const buttonCodes = ref(JSON.parse(localStorage.getItem('buttonCodes') || '[]'))
+
+  let sessionCheckTimer = null
 
   const isLoggedIn = computed(() => !!token.value)
   const isSuperAdmin = computed(() => role.value === 'SUPER_ADMIN')
@@ -47,9 +55,46 @@ export const useUserStore = defineStore('user', () => {
     localStorage.setItem('regionName', userData.regionName || '')
     localStorage.setItem('menuPaths', JSON.stringify(userData.menuPaths || []))
     localStorage.setItem('buttonCodes', JSON.stringify(userData.buttonCodes || []))
+
+    // 登录成功后启动 session 超时检测
+    startSessionMonitor()
   }
 
-  function logout() {
+  function recordActivity() {
+    localStorage.setItem(SESSION_ACTIVITY_KEY, Date.now().toString())
+  }
+
+  function checkSessionTimeout() {
+    const lastActivity = localStorage.getItem(SESSION_ACTIVITY_KEY)
+    if (!lastActivity) {
+      return
+    }
+
+    const elapsed = Date.now() - parseInt(lastActivity, 10)
+    if (elapsed >= SESSION_TIMEOUT_MS) {
+      console.log('[Session] 1小时无操作，session已过期')
+      ElMessage.warning('登录已过期，请重新登录')
+      logout(true)
+    }
+  }
+
+  function startSessionMonitor() {
+    stopSessionMonitor()
+    // 立即记录活动时间
+    recordActivity()
+    // 每分钟检测一次
+    sessionCheckTimer = setInterval(checkSessionTimeout, SESSION_CHECK_INTERVAL_MS)
+  }
+
+  function stopSessionMonitor() {
+    if (sessionCheckTimer) {
+      clearInterval(sessionCheckTimer)
+      sessionCheckTimer = null
+    }
+  }
+
+  function logout(isSessionExpired = false) {
+    stopSessionMonitor()
     token.value = ''
     userId.value = null
     username.value = ''
@@ -71,6 +116,11 @@ export const useUserStore = defineStore('user', () => {
     localStorage.removeItem('regionName')
     localStorage.removeItem('menuPaths')
     localStorage.removeItem('buttonCodes')
+    localStorage.removeItem(SESSION_ACTIVITY_KEY)
+
+    if (!isSessionExpired) {
+      router.push('/login')
+    }
   }
 
   function hasButtonPermission(buttonCode) {
@@ -98,6 +148,9 @@ export const useUserStore = defineStore('user', () => {
     isWindowOperator,
     setUser,
     logout,
+    recordActivity,
+    startSessionMonitor,
+    stopSessionMonitor,
     hasButtonPermission,
     hasMenuPermission
   }

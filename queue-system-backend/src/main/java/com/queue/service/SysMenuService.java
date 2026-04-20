@@ -18,4 +18,7 @@ public interface SysMenuService {
     SysMenu updateMenu(SysMenu menu);
     void deleteMenu(Long id);
     SysMenu getById(Long id);
+
+    // 修复：同步超级管理员菜单权限
+    void syncSuperAdminMenus();
 }

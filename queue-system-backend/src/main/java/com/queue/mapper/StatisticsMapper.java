@@ -30,11 +30,37 @@ public interface StatisticsMapper {
             "LEFT JOIN business_type bt ON t.business_type_id = bt.id " +
             "LEFT JOIN counter c ON t.counter_id = c.id " +
             "WHERE t.deleted = 0 " +
-            "<if test='regionId != null'> AND t.region_id = #{regionId}</if>" +
-            "<if test='businessTypeId != null'> AND t.business_type_id = #{businessTypeId}</if>" +
-            "<if test='startDate != null'> AND DATE(t.created_at) &gt;= #{startDate}</if>" +
-            "<if test='endDate != null'> AND DATE(t.created_at) &lt;= #{endDate}</if>" +
-            "ORDER BY t.created_at DESC" +
+            "<if test='request.allowedRegionIds != null and request.allowedRegionIds.size() > 0'>" +
+            "  AND t.region_id IN " +
+            "  <foreach collection='request.allowedRegionIds' item='rid' open='(' separator=',' close=')'>" +
+            "    #{rid}" +
+            "  </foreach>" +
+            "</if>" +
+            "<if test='request.regionId != null'> AND t.region_id = #{request.regionId}</if>" +
+            "<if test='request.businessTypeId != null'> AND t.business_type_id = #{request.businessTypeId}</if>" +
+            "<if test='request.startDate != null'> AND DATE(t.created_at) &gt;= #{request.startDate}</if>" +
+            "<if test='request.endDate != null'> AND DATE(t.created_at) &lt;= #{request.endDate}</if>" +
+            "<if test='request.sortProp != null and request.sortOrder != null and request.sortProp != \"\"'>" +
+            "  ORDER BY " +
+            "  <choose>" +
+            "    <when test='request.sortProp == \"regionName\"'>r.region_name</when>" +
+            "    <when test='request.sortProp == \"businessName\"'>bt.name</when>" +
+            "    <when test='request.sortProp == \"counterName\"'>c.name</when>" +
+            "    <when test='request.sortProp == \"operatorName\"'>c.operator_name</when>" +
+            "    <when test='request.sortProp == \"ticketStatus\"'>t.status</when>" +
+            "    <when test='request.sortProp == \"customerName\"'>t.name</when>" +
+            "    <when test='request.sortProp == \"ticketNo\"'>t.ticket_no</when>" +
+            "    <when test='request.sortProp == \"createdAt\"'>t.created_at</when>" +
+            "    <when test='request.sortProp == \"calledAt\"'>t.called_at</when>" +
+            "    <when test='request.sortProp == \"servedAt\"'>t.served_at</when>" +
+            "    <when test='request.sortProp == \"completedAt\"'>t.completed_at</when>" +
+            "    <when test='request.sortProp == \"durationSeconds\"'>durationSeconds</when>" +
+            "    <otherwise>t.created_at</otherwise>" +
+            "  </choose>" +
+            "  <if test='request.sortOrder == \"asc\"'>ASC</if>" +
+            "  <if test='request.sortOrder == \"desc\"'>DESC</if>" +
+            "</if>" +
+            "<if test='request.sortProp == null or request.sortProp == \"\"'>ORDER BY t.created_at DESC</if>" +
             "</script>")
     List<StatisticsRecordVO> selectStatisticsList(@Param("request") StatisticsRequest request);
 

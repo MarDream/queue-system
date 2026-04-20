@@ -40,6 +40,9 @@ router.beforeEach((to, from, next) => {
     return
   }
 
+  // 页面切换时记录活动时间
+  userStore.recordActivity()
+
   next()
 })
 
