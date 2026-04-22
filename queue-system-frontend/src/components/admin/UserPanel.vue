@@ -1,5 +1,13 @@
 <template>
   <div class="user-panel">
+    <div class="section-tabs">
+      <el-radio-group v-model="activeSubTab" size="default">
+        <el-radio-button value="users">用户管理</el-radio-button>
+        <el-radio-button v-if="userStore.isSuperAdmin" value="roles">角色管理</el-radio-button>
+      </el-radio-group>
+    </div>
+
+    <template v-if="activeSubTab === 'users'">
     <!-- 统计卡片 -->
     <div class="stats-row">
       <div class="stat-card">
@@ -220,18 +228,51 @@
         <el-button type="primary" :loading="permSaving" @click="handlePermSave">保存</el-button>
       </template>
     </el-dialog>
+    </template>
+
+    <RolePanel v-else />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '../../api/index'
 import { userPermissionApi } from '../../api/admin'
 import { useUserStore } from '../../stores/user'
+import RolePanel from './RolePanel.vue'
+
+const props = defineProps({
+  initialTab: {
+    type: String,
+    default: 'users'
+  }
+})
 
 const userStore = useUserStore()
+const activeSubTab = ref(props.initialTab === 'roles' ? 'roles' : 'users')
+
+watch(
+  () => props.initialTab,
+  (value) => {
+    activeSubTab.value = value === 'roles' && userStore.isSuperAdmin ? 'roles' : 'users'
+  },
+  { immediate: true }
+)
+
+// 监听 regionId 变化，自动设置 regionCode
+watch(
+  () => form.value.regionId,
+  (newRegionId) => {
+    if (newRegionId) {
+      const region = regions.value.find(r => r.id === newRegionId)
+      form.value.regionCode = region?.regionCode || region?.code || ''
+    } else {
+      form.value.regionCode = ''
+    }
+  }
+)
 
 const list = ref([])
 const regions = ref([])
@@ -309,6 +350,7 @@ const form = ref({
   name: '',
   role: '',
   regionId: null,
+  regionCode: '',
   status: 1,
   password: ''
 })
@@ -455,7 +497,7 @@ function openCreate() {
     username: '',
     name: '',
     role: '',
-    regionId: null,
+    regionId: filterRegionId.value, // 自动带入筛选区域
     status: 1,
     password: ''
   }
@@ -677,6 +719,12 @@ onMounted(() => {
 <style scoped>
 .user-panel {
   max-width: 1200px;
+}
+
+.section-tabs {
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--sp-5);
 }
 
 .stats-row {

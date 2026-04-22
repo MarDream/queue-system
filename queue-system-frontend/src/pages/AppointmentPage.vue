@@ -220,6 +220,19 @@ async function fetchRegionAndTypes() {
   }
 }
 
+/** 仅刷新业务类型（带等待人数） */
+async function fetchBusinessTypes() {
+  if (!regionId.value) return
+  try {
+    const typesRes = await axios.get(`/api/v1/business-types`, { params: { regionId: regionId.value } })
+    if (typesRes.data.code === 200) {
+      businessTypes.value = typesRes.data.data || []
+    }
+  } catch (e) {
+    // 静默失败，不影响用户操作
+  }
+}
+
 /** 查询未完成票据 */
 async function checkActiveTicket() {
   if (!phoneValid.value) return
@@ -253,6 +266,8 @@ async function checkActiveTicket() {
 function goToTicketForm() {
   if (refreshTimer) clearInterval(refreshTimer)
   pageState.value = 'ticket'
+  // 刷新业务类型等待人数
+  fetchBusinessTypes()
 }
 
 /** 切换到排队进度 */

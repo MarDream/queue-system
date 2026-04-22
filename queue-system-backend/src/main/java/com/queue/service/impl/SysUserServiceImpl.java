@@ -89,11 +89,15 @@ public class SysUserServiceImpl implements SysUserService {
         vo.setMenuPaths(menuPaths);
         vo.setButtonCodes(buttonCodes);
 
-        // 查询区域名称
+        // 查询区域名称和区域编码
         if (user.getRegionId() != null) {
             Region region = regionMapper.selectById(user.getRegionId());
             if (region != null) {
                 vo.setRegionName(region.getRegionName());
+                // 如果 regionCode 为空，从 region 表补充
+                if (vo.getRegionCode() == null || vo.getRegionCode().isEmpty()) {
+                    vo.setRegionCode(region.getRegionCode());
+                }
             }
         }
 
@@ -259,8 +263,8 @@ public class SysUserServiceImpl implements SysUserService {
         if (user == null) {
             throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "用户不存在");
         }
-        // 使用 MyBatis-Plus 的 deleteById（配合 @TableLogic 会执行逻辑删除）
-        sysUserMapper.deleteById(id);
+        // 物理删除（直接删除，不做软删除）
+        sysUserMapper.physicalDeleteById(id);
     }
 
     @Override
