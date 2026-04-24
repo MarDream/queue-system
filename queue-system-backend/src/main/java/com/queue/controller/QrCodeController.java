@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.OutputStream;
 import java.util.HashMap;
@@ -43,9 +44,10 @@ public class QrCodeController {
             @RequestParam Long regionId,
             @RequestParam(required = false) String baseUrl,
             @RequestParam(defaultValue = "300") int size,
+            HttpServletRequest request,
             HttpServletResponse response) throws Exception {
 
-        String effectiveBaseUrl = (baseUrl != null && !baseUrl.isEmpty()) ? baseUrl : serverConfig.getFrontendBaseUrl();
+        String effectiveBaseUrl = resolveFrontendBaseUrl(baseUrl, request);
 
         Region region = regionService.getById(regionId);
         if (region == null) {
@@ -74,8 +76,9 @@ public class QrCodeController {
     public Result<Map<String, Object>> getUrl(
             @RequestParam String regionCode,
             @RequestParam(required = false) Long userId,
-            @RequestParam(required = false) String baseUrl) {
-        String effectiveBaseUrl = (baseUrl != null && !baseUrl.isEmpty()) ? baseUrl : serverConfig.getFrontendBaseUrl();
+            @RequestParam(required = false) String baseUrl,
+            HttpServletRequest request) {
+        String effectiveBaseUrl = resolveFrontendBaseUrl(baseUrl, request);
         Region region = regionService.getByCode(regionCode);
         if (region == null) {
             return Result.error(400, "区域不存在");
@@ -113,6 +116,39 @@ public class QrCodeController {
         data.put("createdAt", record.getCreatedAt());
         data.put("createdBy", record.getCreatedBy());
         return Result.ok(data);
+    }
+
+    private String resolveFrontendBaseUrl(String baseUrl, HttpServletRequest request) {
+        if (baseUrl != null && !baseUrl.isBlank()) {
+            return trimTrailingSlash(baseUrl);
+        }
+
+        String origin = request.getHeader("Origin");
+        if (origin != null && !origin.isBlank() && !"null".equalsIgnoreCase(origin)) {
+            return trimTrailingSlash(origin);
+        }
+
+        String referer = request.getHeader("Referer");
+        if (referer != null && !referer.isBlank()) {
+            int pathIndex = referer.indexOf('/', referer.indexOf("://") + 3);
+            String refererBase = pathIndex > 0 ? referer.substring(0, pathIndex) : referer;
+            return trimTrailingSlash(refererBase);
+        }
+
+        String forwardedProto = request.getHeader("X-Forwarded-Proto");
+        String forwardedHost = request.getHeader("X-Forwarded-Host");
+        if (forwardedProto != null && !forwardedProto.isBlank() && forwardedHost != null && !forwardedHost.isBlank()) {
+            return trimTrailingSlash(forwardedProto + "://" + forwardedHost);
+        }
+
+        return trimTrailingSlash(serverConfig.getFrontendBaseUrl());
+    }
+
+    private String trimTrailingSlash(String url) {
+        if (url == null) {
+            return null;
+        }
+        return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
     }
 
     @GetMapping("/list")

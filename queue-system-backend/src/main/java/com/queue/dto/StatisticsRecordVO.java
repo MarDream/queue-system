@@ -22,4 +22,6 @@ public class StatisticsRecordVO {
     private LocalDateTime servedAt;
     private LocalDateTime completedAt;
     private Long durationSeconds;
+    // 过号来源类型
+    private String skipType;
 }

@@ -57,7 +57,7 @@ public class StatisticsServiceImpl implements StatisticsService {
         try (Workbook workbook = new XSSFWorkbook()) {
             Sheet sheet = workbook.createSheet("统计分析");
 
-            String[] headers = {"区域名称", "业务名称", "窗口名称", "操作人员", "状态", "客户姓名", "票号",
+            String[] headers = {"区域名称", "业务名称", "窗口名称", "操作人员", "状态", "过号来源", "客户姓名", "票号",
                                "取号时间", "叫号时间", "开始服务时间", "完成时间", "办理时长(秒)"};
             Row headerRow = sheet.createRow(0);
             for (int i = 0; i < headers.length; i++) {
@@ -73,13 +73,14 @@ public class StatisticsServiceImpl implements StatisticsService {
                 row.createCell(2).setCellValue(record.getCounterName());
                 row.createCell(3).setCellValue(record.getOperatorName());
                 row.createCell(4).setCellValue(record.getTicketStatus());
-                row.createCell(5).setCellValue(record.getCustomerName());
-                row.createCell(6).setCellValue(record.getTicketNo());
-                row.createCell(7).setCellValue(record.getCreatedAt() != null ? record.getCreatedAt().format(DT_FORMATTER) : "");
-                row.createCell(8).setCellValue(record.getCalledAt() != null ? record.getCalledAt().format(DT_FORMATTER) : "");
-                row.createCell(9).setCellValue(record.getServedAt() != null ? record.getServedAt().format(DT_FORMATTER) : "");
-                row.createCell(10).setCellValue(record.getCompletedAt() != null ? record.getCompletedAt().format(DT_FORMATTER) : "");
-                row.createCell(11).setCellValue(record.getDurationSeconds() != null ? record.getDurationSeconds().toString() : "");
+                row.createCell(5).setCellValue("manual".equals(record.getSkipType()) ? "人工跳过" : "system".equals(record.getSkipType()) ? "系统过号" : "");
+                row.createCell(6).setCellValue(record.getCustomerName());
+                row.createCell(7).setCellValue(record.getTicketNo());
+                row.createCell(8).setCellValue(record.getCreatedAt() != null ? record.getCreatedAt().format(DT_FORMATTER) : "");
+                row.createCell(9).setCellValue(record.getCalledAt() != null ? record.getCalledAt().format(DT_FORMATTER) : "");
+                row.createCell(10).setCellValue(record.getServedAt() != null ? record.getServedAt().format(DT_FORMATTER) : "");
+                row.createCell(11).setCellValue(record.getCompletedAt() != null ? record.getCompletedAt().format(DT_FORMATTER) : "");
+                row.createCell(12).setCellValue(record.getDurationSeconds() != null ? record.getDurationSeconds().toString() : "");
             }
 
             for (int i = 0; i < headers.length; i++) {

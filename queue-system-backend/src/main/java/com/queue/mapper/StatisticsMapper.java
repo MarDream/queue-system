@@ -24,7 +24,8 @@ public interface StatisticsMapper {
             "  t.called_at AS calledAt, " +
             "  t.served_at AS servedAt, " +
             "  t.completed_at AS completedAt, " +
-            "  TIMESTAMPDIFF(SECOND, t.served_at, t.completed_at) AS durationSeconds " +
+            "  TIMESTAMPDIFF(SECOND, t.served_at, t.completed_at) AS durationSeconds, " +
+            "  t.skip_type AS skipType " +
             "FROM ticket t " +
             "LEFT JOIN region r ON t.region_id = r.id " +
             "LEFT JOIN business_type bt ON t.business_type_id = bt.id " +
@@ -40,6 +41,13 @@ public interface StatisticsMapper {
             "<if test='request.businessTypeId != null'> AND t.business_type_id = #{request.businessTypeId}</if>" +
             "<if test='request.startDate != null'> AND DATE(t.created_at) &gt;= #{request.startDate}</if>" +
             "<if test='request.endDate != null'> AND DATE(t.created_at) &lt;= #{request.endDate}</if>" +
+            "<if test='request.status != null and request.status != \"\"'>" +
+            "  <choose>" +
+            "    <when test='request.status == \"skipped_system\"'> AND t.status = 'skipped' AND t.skip_type = 'system'</when>" +
+            "    <otherwise> AND t.status = #{request.status}</otherwise>" +
+            "  </choose>" +
+            "</if>" +
+            "<if test='request.skipType != null and request.skipType != \"\"'> AND t.skip_type = #{request.skipType}</if>" +
             "<if test='request.sortProp != null and request.sortOrder != null and request.sortProp != \"\"'>" +
             "  ORDER BY " +
             "  <choose>" +

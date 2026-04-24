@@ -22,6 +22,15 @@
         </el-select>
         <el-date-picker v-model="filter.dateRange" type="daterange" range-separator="至" start-placeholder="开始日期"
           end-placeholder="结束日期" value-format="YYYY-MM-DD" style="width:260px" />
+        <el-select v-model="filter.status" placeholder="票号状态" clearable style="width:140px">
+          <el-option label="已过号(人工)" value="skipped" />
+          <el-option label="已过号(系统)" value="skipped_system" />
+          <el-option label="等待中" value="waiting" />
+          <el-option label="已叫号" value="called" />
+          <el-option label="服务中" value="serving" />
+          <el-option label="已完成" value="completed" />
+          <el-option label="已取消" value="cancelled" />
+        </el-select>
         <el-button type="primary" @click="loadData" :loading="loading">
           <el-icon><Search /></el-icon> 查询
         </el-button>
@@ -78,6 +87,29 @@
           <template #default="{ row }">{{ formatDateTime(row.completedAt) }}</template>
         </el-table-column>
         <el-table-column v-if="isColumnVisible('durationSeconds')" prop="durationSeconds" label="办理时长(秒)" min-width="120" sortable="custom" />
+        <el-table-column v-if="isColumnVisible('skipType')" prop="skipType" label="过号来源" min-width="100">
+          <template #default="{ row }">
+            <span v-if="row.ticketStatus === 'skipped'">
+              {{ row.skipType === 'manual' ? '人工跳过' : row.skipType === 'system' ? '系统过号' : '-' }}
+            </span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="100" fixed="right" v-if="hasReactivatePermission">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.ticketStatus === 'skipped' && row.skipType === 'manual'"
+              type="primary"
+              link
+              size="small"
+              @click="handleReactivate(row)"
+              :loading="row.reactivating"
+            >
+              重新激活
+            </el-button>
+            <span v-else style="color: var(--text-muted); font-size: 12px;">-</span>
+          </template>
+        </el-table-column>
       </el-table>
     </div>
 
@@ -118,12 +150,20 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { statisticsApi } from '../../api/admin'
 import { businessTypeApi } from '../../api/admin'
+import { reactivate } from '../../api/counter'
 import request from '../../api/index'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '../../stores/user'
 import { Search, RefreshRight, Download, Setting, Tickets } from '@element-plus/icons-vue'
 
 const userStore = useUserStore()
+
+// 检查是否有重新激活权限
+const hasReactivatePermission = computed(() => {
+  if (userStore.isSuperAdmin) return true
+  const buttons = userStore.buttons || []
+  return buttons.includes('btn:reactivate')
+})
 
 const loading = ref(false)
 const tableData = ref([])
@@ -136,7 +176,8 @@ const filter = reactive({
   businessTypeId: null,
   dateRange: null,
   startDate: null,
-  endDate: null
+  endDate: null,
+  status: null
 })
 
 const pagination = reactive({
@@ -207,7 +248,8 @@ const allColumns = ref([
   { key: 'calledAt', label: '叫号时间', visible: true },
   { key: 'servedAt', label: '办理开始时间', visible: true },
   { key: 'completedAt', label: '办理结束时间', visible: true },
-  { key: 'durationSeconds', label: '办理时长(秒)', visible: true }
+  { key: 'durationSeconds', label: '办理时长(秒)', visible: true },
+  { key: 'skipType', label: '过号来源', visible: true }
 ])
 
 // 从 LocalStorage 恢复用户偏好
@@ -352,6 +394,23 @@ function handleSortChange({ prop, order }) {
   sortConfig.order = order || ''
   pagination.pageNum = 1
   loadData()
+}
+
+async function handleReactivate(row) {
+  if (!row.ticketNo) {
+    ElMessage.warning('票号信息不完整')
+    return
+  }
+  row.reactivating = true
+  try {
+    await counterApi.reactivate(row.ticketNo)
+    ElMessage.success(`票号 ${getTicketNo(row.ticketNo)} 已重新激活到队首`)
+    loadData()
+  } catch (err) {
+    ElMessage.error(err.message || '激活失败')
+  } finally {
+    row.reactivating = false
+  }
 }
 
 onMounted(() => {

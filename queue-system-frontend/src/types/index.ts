@@ -90,3 +90,13 @@ export interface SysButton {
   code: string
   sortOrder: number
 }
+
+// 角色
+export interface SysRole {
+  id: number
+  code: string
+  name: string
+  description: string
+  sortOrder: number
+  type: 'SYSTEM' | 'CUSTOM'
+}

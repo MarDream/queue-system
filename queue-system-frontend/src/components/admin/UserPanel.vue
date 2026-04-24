@@ -261,19 +261,6 @@ watch(
   { immediate: true }
 )
 
-// 监听 regionId 变化，自动设置 regionCode
-watch(
-  () => form.value.regionId,
-  (newRegionId) => {
-    if (newRegionId) {
-      const region = regions.value.find(r => r.id === newRegionId)
-      form.value.regionCode = region?.regionCode || region?.code || ''
-    } else {
-      form.value.regionCode = ''
-    }
-  }
-)
-
 const list = ref([])
 const regions = ref([])
 const loading = ref(false)
@@ -354,6 +341,20 @@ const form = ref({
   status: 1,
   password: ''
 })
+
+// 监听 regionId 变化，自动设置 regionCode
+watch(
+  () => form.value.regionId,
+  (newRegionId) => {
+    if (!newRegionId) {
+      form.value.regionCode = ''
+      return
+    }
+    const id = Number(newRegionId)
+    const region = regions.value.find(r => Number(r.id) === id)
+    form.value.regionCode = region?.code || region?.regionCode || ''
+  }
+)
 
 // 按角色过滤可选角色（新增时不允许选超级管理员）
 const availableRoles = computed(() => {
@@ -498,6 +499,7 @@ function openCreate() {
     name: '',
     role: '',
     regionId: filterRegionId.value, // 自动带入筛选区域
+    regionCode: '',
     status: 1,
     password: ''
   }
@@ -512,6 +514,7 @@ function openEdit(row) {
     name: row.name,
     role: row.role,
     regionId: row.regionId,
+    regionCode: '',
     status: row.status,
     password: ''
   }

@@ -38,3 +38,4 @@ memory/
 *.tmp
 *.bak
 *.swp
+/queue-system-frontend/dist.tar.gz

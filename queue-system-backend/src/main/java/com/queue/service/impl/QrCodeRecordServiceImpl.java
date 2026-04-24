@@ -18,19 +18,21 @@ public class QrCodeRecordServiceImpl implements QrCodeRecordService {
     @Override
     @Transactional
     public QrCodeRecord saveOrUpdate(Long regionId, String regionCode, String regionName, String url, String createdBy) {
+        // 查询时不考虑 deleted 字段，直接按 regionId 查找
         QrCodeRecord existing = mapper.selectOne(new LambdaQueryWrapper<QrCodeRecord>()
-                .eq(QrCodeRecord::getRegionId, regionId)
-                .eq(QrCodeRecord::getDeleted, 0));
+                .eq(QrCodeRecord::getRegionId, regionId));
 
         if (existing != null) {
+            // 只更新需要的字段，不更新 region_id（避免唯一键冲突）
             existing.setUrl(url);
-            existing.setRegionCode(regionCode);
             existing.setRegionName(regionName);
             if (createdBy != null && !createdBy.isEmpty()) {
                 existing.setCreatedBy(createdBy);
             }
+            // 明确设置 deleted=0，防止被更新为其他值
+            existing.setDeleted(0);
             mapper.updateById(existing);
-            return mapper.selectById(existing.getId());
+            return existing;
         }
 
         QrCodeRecord record = new QrCodeRecord();
@@ -53,6 +55,7 @@ public class QrCodeRecordServiceImpl implements QrCodeRecordService {
 
     @Override
     public void delete(Long id) {
-        mapper.deleteById(id);
+        // 物理删除（直接删除，不做软删除）
+        mapper.physicalDeleteById(id);
     }
 }

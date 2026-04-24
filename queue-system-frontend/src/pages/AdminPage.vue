@@ -151,10 +151,44 @@
           <BusinessTypePanel v-if="activeKey === 'biz'" />
           <CounterPanel v-if="activeKey === 'counters'" />
           <QrCodePanel v-if="activeKey === 'qrcode'" />
-          <UserPanel v-if="activeKey === 'users'" />
+          <UserPanel v-if="activeKey === 'users'" :initial-tab="userSubTab" />
           <MenuPanel v-if="activeKey === 'menu'" @reload="loadMenus" />
           <StatisticsPanel v-if="activeKey === 'statistics'" />
         </div>
+
+        <el-dialog v-model="regionPickerVisible" width="520px" draggable :show-close="false">
+          <template #header>
+            <div class="dialog-header">
+              <span class="dialog-title">选择区域</span>
+              <el-button circle size="small" class="icon-close-btn" @click="regionPickerVisible = false" title="关闭">
+                <svg class="close-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <path d="M15 9l-6 6M9 9l6 6"/>
+                </svg>
+              </el-button>
+            </div>
+          </template>
+
+          <div class="region-picker-body">
+            <div class="region-picker-tip">超级管理员不绑定固定区域，请选择本次要进入的区域。</div>
+            <el-tree-select
+              v-model="regionPickerCode"
+              :data="regionTreeForPicker"
+              :props="{ label: 'label', value: 'value', children: 'children' }"
+              placeholder="请选择区域"
+              clearable
+              check-strictly
+              :render-after-expand="false"
+              filterable
+              style="width:100%"
+            />
+          </div>
+
+          <template #footer>
+            <el-button @click="regionPickerVisible = false">取消</el-button>
+            <el-button type="primary" :disabled="!regionPickerCode" @click="confirmRegionPicker">确定</el-button>
+          </template>
+        </el-dialog>
       </div>
     </main>
 
@@ -190,6 +224,7 @@ import { SwitchButton, Location, UserFilled, Avatar } from '@element-plus/icons-
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import { menuApi } from '../api/admin'
+import request from '../api/index'
 import Sortable from 'sortablejs'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DashboardPanel from '../components/admin/DashboardPanel.vue'
@@ -206,6 +241,7 @@ const router = useRouter()
 const userStore = useUserStore()
 
 const activeKey = ref('dashboard')
+const userSubTab = ref('users')
 const isNarrow = ref(false)
 const isMobile = ref(false)
 const sidebarCollapsed = ref(false)
@@ -346,7 +382,7 @@ function isItemOrChildActive(item) {
 function menuKeyFromPath(path) {
   const map = {
     '/home': 'dashboard',
-    '/kiosk': 'kiosk',
+    '/appointment': 'appointment',
     '/admin': 'dashboard',
     '/admin?tab=region': 'region',
     '/admin?tab=biz': 'biz',
@@ -354,6 +390,7 @@ function menuKeyFromPath(path) {
     '/admin?tab=qrcode': 'qrcode',
     '/admin?tab=users': 'users',
     '/admin?tab=menu': 'menu',
+    '/admin?tab=roles': 'users',
     '/admin?tab=statistics': 'statistics',
     '/counter': 'counter',
     '/display': 'display'
@@ -391,18 +428,32 @@ function handleMenuClick(item) {
     expandedIds.value = newSet
   }
   // 独立页面菜单项 → 新标签页打开
-  const routeKeys = { home: '/home', kiosk: '/kiosk', counter: '/counter', display: '/display' }
+  const routeKeys = { home: '/home', appointment: '/appointment', counter: '/counter', display: '/display' }
   if (item.key && routeKeys[item.key]) {
     let url = routeKeys[item.key]
     // 取号页面和大屏默认带上当前用户的 regionCode
-    if ((item.key === 'kiosk' || item.key === 'display') && userStore.regionCode) {
-      url += `?region=${userStore.regionCode}`
+    if (item.key === 'appointment' || item.key === 'display') {
+      const savedRegionCode = localStorage.getItem('lastRegionCode') || ''
+      const regionCode = userStore.regionCode || savedRegionCode
+      if (!regionCode) {
+        openRegionPicker(item.key)
+        return
+      }
+      localStorage.setItem('lastRegionCode', regionCode)
+      const targetUrl = item.key === 'display'
+        ? `/display?region=${encodeURIComponent(regionCode)}`
+        : `/appointment?region=${encodeURIComponent(regionCode)}`
+      window.open(targetUrl, '_blank')
+      return
     }
     window.open(url, '_blank')
     return
   }
   // 管理后台内部面板切换
   if (item.key) {
+    if (item.key === 'users') {
+      userSubTab.value = item.path === '/admin?tab=roles' ? 'roles' : 'users'
+    }
     activeKey.value = item.key
   }
 }
@@ -420,6 +471,60 @@ function toggleGroup(groupId) {
 function handleLogout() {
   userStore.logout()
   router.push('/login')
+}
+
+const regionPickerVisible = ref(false)
+const regionPickerCode = ref('')
+const regionPickerTarget = ref('')
+const allRegionsForPicker = ref([])
+
+const regionTreeForPicker = computed(() => buildRegionTreeForPicker(allRegionsForPicker.value))
+
+function buildRegionTreeForPicker(flatRegions) {
+  if (!flatRegions || flatRegions.length === 0) return []
+  const map = {}
+  const roots = []
+  for (const r of flatRegions) {
+    const code = r.code || r.regionCode || ''
+    const name = r.name || r.regionName || ''
+    map[r.id] = { ...r, label: code ? `${name}（${code}）` : name, value: code, children: [] }
+  }
+  for (const r of flatRegions) {
+    const node = map[r.id]
+    if (!r.parentId || !map[r.parentId]) {
+      roots.push(node)
+    } else {
+      map[r.parentId].children.push(node)
+    }
+  }
+  return roots
+}
+
+async function ensureRegionsLoaded() {
+  if (allRegionsForPicker.value.length > 0) return
+  allRegionsForPicker.value = await request.get('/regions')
+}
+
+async function openRegionPicker(targetKey) {
+  try {
+    await ensureRegionsLoaded()
+    regionPickerTarget.value = targetKey
+    regionPickerCode.value = ''
+    regionPickerVisible.value = true
+  } catch (e) {
+    ElMessage.error(e.message || '获取区域列表失败')
+  }
+}
+
+function confirmRegionPicker() {
+  const code = (regionPickerCode.value || '').trim()
+  if (!code) return
+  localStorage.setItem('lastRegionCode', code)
+  regionPickerVisible.value = false
+  const targetUrl = regionPickerTarget.value === 'display'
+    ? `/display?region=${encodeURIComponent(code)}`
+    : `/appointment?region=${encodeURIComponent(code)}`
+  window.open(targetUrl, '_blank')
 }
 
 function getRoleName(role) {
@@ -794,11 +899,13 @@ async function loadMenus() {
       params.userId = Number(userStore.userId) || undefined
     }
     const data = await menuApi.list(params)
-    menuList.value = (data || []).map(item => ({
+    menuList.value = (data || [])
+      .filter(item => item.path !== '/admin?tab=roles')
+      .map(item => ({
       ...item,
       name: normalizeMenuName(item.path, item.name),
       icon: normalizeMenuIcon(item.icon)
-    }))
+      }))
     // 默认展开所有分组
     const newExpanded = new Set(expandedIds.value)
     for (const m of menuList.value) {
@@ -824,7 +931,13 @@ async function loadMenus() {
 onMounted(() => {
   const params = new URLSearchParams(window.location.search)
   const tab = params.get('tab')
-  if (tab) activeKey.value = tab
+  if (tab === 'roles') {
+    activeKey.value = 'users'
+    userSubTab.value = 'roles'
+  } else if (tab) {
+    activeKey.value = tab
+    userSubTab.value = 'users'
+  }
 
   checkScreenSize()
   window.addEventListener('resize', checkScreenSize)
@@ -1300,6 +1413,17 @@ onUnmounted(() => {
 
 .panel-host {
   min-height: calc(100% - 88px);
+}
+
+.region-picker-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.region-picker-tip {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
 }
 
 .mobile-tab-bar {

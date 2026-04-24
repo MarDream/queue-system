@@ -2,6 +2,7 @@ package com.queue.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.queue.entity.SysUser;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -17,4 +18,10 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
             "AND r.id = #{regionId} " +
             "ORDER BY u.name")
     List<SysUser> selectByRegionIdAndRole(@Param("regionId") Long regionId, @Param("role") String role);
+
+    /**
+     * 物理删除（不经过逻辑删除）
+     */
+    @Delete("DELETE FROM sys_user WHERE id = #{id}")
+    int physicalDeleteById(@Param("id") Long id);
 }

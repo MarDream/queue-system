@@ -23,4 +23,5 @@ public class AdminTicketVO {
     private LocalDateTime calledAt;
     private LocalDateTime servedAt;
     private LocalDateTime completedAt;
+    private String skipType; // 过号来源类型：manual=人工跳过，system=系统过号
 }

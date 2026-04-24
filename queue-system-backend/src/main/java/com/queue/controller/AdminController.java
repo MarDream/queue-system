@@ -330,7 +330,8 @@ public class AdminController {
         if (!CounterStatus.IDLE.getValue().equals(counter.getStatus())) {
             return Result.error(ResultCode.COUNTER_NOT_OPERABLE);
         }
-        counterMapper.deleteById(id);
+        // 物理删除（直接删除，不做软删除）
+        counterMapper.physicalDeleteById(id);
         counterBusinessMapper.delete(new QueryWrapper<CounterBusiness>().eq("counter_id", id));
         counterOperatorMapper.deleteByCounterId(id);
         return Result.ok();

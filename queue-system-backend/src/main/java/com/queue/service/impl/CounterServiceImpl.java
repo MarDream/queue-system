@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.queue.common.BusinessException;
 import com.queue.common.ResultCode;
 import com.queue.enums.CounterStatus;
+import com.queue.enums.SkipType;
 import com.queue.enums.TicketStatus;
 import com.queue.entity.Counter;
 import com.queue.entity.Ticket;
@@ -12,6 +13,7 @@ import com.queue.dto.CounterCallResponse;
 import com.queue.mapper.BusinessTypeMapper;
 import com.queue.mapper.CounterBusinessMapper;
 import com.queue.mapper.CounterMapper;
+import com.queue.mapper.RegionMapper;
 import com.queue.mapper.TicketMapper;
 import com.queue.service.CounterService;
 import com.queue.service.QueueService;
@@ -29,17 +31,20 @@ public class CounterServiceImpl implements CounterService {
     private final TicketMapper ticketMapper;
     private final QueueService queueService;
     private final BusinessTypeMapper businessTypeMapper;
+    private final RegionMapper regionMapper;
 
     public CounterServiceImpl(CounterMapper counterMapper,
                               CounterBusinessMapper counterBusinessMapper,
                               TicketMapper ticketMapper,
                               QueueService queueService,
-                              BusinessTypeMapper businessTypeMapper) {
+                              BusinessTypeMapper businessTypeMapper,
+                              RegionMapper regionMapper) {
         this.counterMapper = counterMapper;
         this.counterBusinessMapper = counterBusinessMapper;
         this.ticketMapper = ticketMapper;
         this.queueService = queueService;
         this.businessTypeMapper = businessTypeMapper;
+        this.regionMapper = regionMapper;
     }
 
     @Override
@@ -91,7 +96,9 @@ public class CounterServiceImpl implements CounterService {
             resp.setTicketNo(bestTicket.getTicketNo());
             resp.setBusinessType(bt != null ? bt.getName() : "");
             resp.setCustomerName(bestTicket.getName());
-            resp.setCounterName(counter.getName());
+            // 拼接区域完整路径 + 窗口编号，如：深圳市-南山区1号窗口
+            String regionPath = regionMapper.selectFullRegionPath(counter.getRegionId());
+            resp.setCounterName(regionPath != null ? regionPath + counter.getNumber() + "号窗口" : counter.getName());
             resp.setCalledAt(bestTicket.getCalledAt());
             return resp;
         } finally {
@@ -117,7 +124,9 @@ public class CounterServiceImpl implements CounterService {
         resp.setTicketNo(ticket.getTicketNo());
         resp.setBusinessType(bt != null ? bt.getName() : "");
         resp.setCustomerName(ticket.getName());
-        resp.setCounterName(counter.getName());
+        // 拼接区域完整路径 + 窗口编号，如：深圳市-南山区1号窗口
+        String regionPath = regionMapper.selectFullRegionPath(counter.getRegionId());
+        resp.setCounterName(regionPath != null ? regionPath + counter.getNumber() + "号窗口" : counter.getName());
         resp.setCalledAt(ticket.getCalledAt());
         return resp;
     }
@@ -145,6 +154,7 @@ public class CounterServiceImpl implements CounterService {
             }
 
             ticket.setStatus(TicketStatus.SKIPPED.getValue());
+            ticket.setSkipType(SkipType.MANUAL.getValue()); // 人工跳过
             ticketMapper.updateById(ticket);
 
             counter.setStatus(CounterStatus.IDLE.getValue());
@@ -240,5 +250,42 @@ public class CounterServiceImpl implements CounterService {
         } finally {
             queueService.releaseLock(lockKey);
         }
+    }
+
+    @Override
+    @Transactional
+    public void reactivateSkippedTicket(String ticketNo) {
+        if (ticketNo == null || ticketNo.isBlank()) {
+            throw new BusinessException(ResultCode.TICKET_NOT_FOUND);
+        }
+        Ticket ticket = ticketMapper.selectOne(
+            new QueryWrapper<Ticket>()
+                .eq("ticket_no", ticketNo)
+                .last("LIMIT 1")
+        );
+        if (ticket == null) {
+            throw new BusinessException(ResultCode.TICKET_NOT_FOUND);
+        }
+        if (!TicketStatus.SKIPPED.getValue().equals(ticket.getStatus())) {
+            throw new BusinessException(50001, "只有已过号状态的票才能重新激活");
+        }
+        // 检查是否为当日票
+        LocalDateTime today = LocalDateTime.now();
+        LocalDateTime startOfDay = today.toLocalDate().atStartOfDay();
+        LocalDateTime endOfDay = today.toLocalDate().plusDays(1).atStartOfDay();
+        if (ticket.getCreatedAt() == null ||
+            ticket.getCreatedAt().isBefore(startOfDay) || ticket.getCreatedAt().isAfter(endOfDay)) {
+            throw new BusinessException(50001, "只能重新激活当日过号的票");
+        }
+
+        // 重新激活：状态改为等待，清空过号类型，counterId 置空
+        ticket.setStatus(TicketStatus.WAITING.getValue());
+        ticket.setSkipType(null);
+        ticket.setCounterId(null);
+        ticketMapper.updateById(ticket);
+
+        // 重新加入等待队列（队首）
+        queueService.enqueueAtFront(ticket.getRegionId(), ticket.getBusinessTypeId(), ticket.getId());
+        queueService.incrementWaitingCount(ticket.getRegionId(), ticket.getBusinessTypeId());
     }
 }

@@ -76,3 +76,10 @@ export function complete(counterId) { return counterRequest.post('/counter/compl
  * @returns {Promise<Object>} updated counter state
  */
 export function togglePause(counterId) { return counterRequest.post('/counter/toggle-pause', { counterId }) }
+
+/**
+ * Reactivate a skipped ticket back to waiting queue front.
+ * @param {string} ticketNo
+ * @returns {Promise<void>}
+ */
+export function reactivate(ticketNo) { return counterRequest.post('/counter/reactivate', { ticketNo }) }

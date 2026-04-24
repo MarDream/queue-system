@@ -3,12 +3,16 @@ package com.queue.controller;
 import com.queue.common.BusinessException;
 import com.queue.common.Result;
 import com.queue.common.ResultCode;
+import com.queue.dto.SysRoleDTO;
 import com.queue.entity.SysMenu;
+import com.queue.entity.SysRole;
 import com.queue.entity.SysUser;
 import com.queue.mapper.SysRoleButtonMapper;
 import com.queue.mapper.SysRoleMenuMapper;
 import com.queue.mapper.SysUserMapper;
+import com.queue.mapper.SysRoleMapper;
 import com.queue.service.SysMenuService;
+import com.queue.service.SysRoleService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,119 +24,115 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/admin/roles")
 @RequiredArgsConstructor
-public class RolePermissionController {
+public class RoleController {
 
+    private final SysRoleService sysRoleService;
+    private final SysRoleMapper sysRoleMapper;
     private final SysRoleMenuMapper sysRoleMenuMapper;
     private final SysRoleButtonMapper sysRoleButtonMapper;
-    private final SysUserMapper sysUserMapper;
     private final SysMenuService sysMenuService;
     private final com.queue.mapper.SysButtonMapper sysButtonMapper;
 
-    /**
-     * 获取所有角色列表
-     */
     @GetMapping
-    public Result<List<Map<String, String>>> listRoles() {
-        List<Map<String, String>> roles = List.of(
-            Map.of("value", "SUPER_ADMIN", "label", "超级管理员"),
-            Map.of("value", "REGION_ADMIN", "label", "区域管理员"),
-            Map.of("value", "WINDOW_OPERATOR", "label", "窗口操作员")
-        );
-        return Result.ok(roles);
+    public Result<List<SysRole>> list() {
+        return Result.ok(sysRoleService.listAll());
     }
 
-    /**
-     * 获取所有菜单列表
-     */
+    @GetMapping("/{id}")
+    public Result<SysRole> getById(@PathVariable Long id) {
+        return Result.ok(sysRoleService.getById(id));
+    }
+
+    @PostMapping
+    public Result<SysRole> create(@RequestBody SysRoleDTO dto, HttpServletRequest req) {
+        validateSuperAdmin(req);
+        return Result.ok(sysRoleService.create(dto));
+    }
+
+    @PutMapping("/{id}")
+    public Result<SysRole> update(@PathVariable Long id, @RequestBody SysRoleDTO dto, HttpServletRequest req) {
+        validateSuperAdmin(req);
+        dto.setId(id);
+        return Result.ok(sysRoleService.update(dto));
+    }
+
+    @DeleteMapping("/{id}")
+    public Result<Void> delete(@PathVariable Long id, HttpServletRequest req) {
+        validateSuperAdmin(req);
+        sysRoleService.delete(id);
+        return Result.ok();
+    }
+
     @GetMapping("/menus")
     public Result<List<SysMenu>> listAllMenus() {
         return Result.ok(sysMenuService.listAll());
     }
 
-    /**
-     * 获取所有按钮列表（用于角色权限配置）
-     */
     @GetMapping("/buttons")
     public Result<List<com.queue.entity.SysButton>> listAllButtons() {
-        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.queue.entity.SysButton> qw =
-            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+        var qw = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.queue.entity.SysButton>();
         qw.eq(com.queue.entity.SysButton::getDeleted, 0)
           .orderByAsc(com.queue.entity.SysButton::getSortOrder);
         return Result.ok(sysButtonMapper.selectList(qw));
     }
 
-    /**
-     * 获取指定角色的菜单权限
-     */
-    @GetMapping("/{role}/menus")
-    public Result<List<Long>> getRoleMenus(@PathVariable String role) {
-        List<Long> menuIds = sysRoleMenuMapper.selectMenuIdsByRole(role);
+    @GetMapping("/{code}/menus")
+    public Result<List<Long>> getRoleMenus(@PathVariable String code) {
+        List<Long> menuIds = sysRoleMenuMapper.selectMenuIdsByRole(code);
         return Result.ok(menuIds != null ? menuIds : List.of());
     }
 
-    /**
-     * 获取指定角色的按钮权限
-     */
-    @GetMapping("/{role}/buttons")
-    public Result<List<Long>> getRoleButtons(@PathVariable String role) {
-        List<Long> buttonIds = sysRoleButtonMapper.selectButtonIdsByRole(role);
+    @GetMapping("/{code}/buttons")
+    public Result<List<Long>> getRoleButtons(@PathVariable String code) {
+        List<Long> buttonIds = sysRoleButtonMapper.selectButtonIdsByRole(code);
         return Result.ok(buttonIds != null ? buttonIds : List.of());
     }
 
-    /**
-     * 更新角色菜单权限
-     */
-    @PutMapping("/{role}/menus")
+    @PutMapping("/{code}/menus")
     @Transactional
     public Result<Void> updateRoleMenus(
-            @PathVariable String role,
+            @PathVariable String code,
             @RequestBody Map<String, List<Long>> body,
             HttpServletRequest req) {
-        // 权限校验
         validateSuperAdmin(req);
-
         List<Long> menuIds = body.get("menuIds");
-        if (menuIds == null) {
-            menuIds = List.of();
-        }
+        if (menuIds == null) menuIds = List.of();
 
-        // 删除现有菜单权限
-        sysRoleMenuMapper.deleteByRole(role);
-        // 插入新权限
+        SysRole role = sysRoleService.getByCode(code);
+        if (role == null) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "角色不存在");
+        }
+        sysRoleMenuMapper.deleteByRoleCode(code);
         for (Long menuId : menuIds) {
-            sysRoleMenuMapper.insertRoleMenu(role, menuId);
+            sysRoleMenuMapper.insertRoleMenu(role.getId(), code, menuId);
         }
-
         return Result.ok();
     }
 
-    /**
-     * 批量更新角色完整权限（菜单+按钮）
-     */
-    @PutMapping("/{role}/permissions")
+    @PutMapping("/{code}/permissions")
     @Transactional
     public Result<Void> updateRolePermissions(
-            @PathVariable String role,
+            @PathVariable String code,
             @RequestBody Map<String, Object> body,
             HttpServletRequest req) {
-        // 权限校验
         validateSuperAdmin(req);
 
         List<Long> menuIds = toLongList(body.get("menuIds"));
         List<Long> buttonIds = toLongList(body.get("buttonIds"));
 
-        // 更新菜单权限
-        sysRoleMenuMapper.deleteByRole(role);
+        SysRole role = sysRoleService.getByCode(code);
+        if (role == null) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "角色不存在");
+        }
+        sysRoleMenuMapper.deleteByRoleCode(code);
         for (Long menuId : menuIds) {
-            sysRoleMenuMapper.insertRoleMenu(role, menuId);
+            sysRoleMenuMapper.insertRoleMenu(role.getId(), code, menuId);
         }
 
-        // 更新按钮权限
-        sysRoleButtonMapper.deleteByRole(role);
+        sysRoleButtonMapper.deleteByRoleCode(code);
         for (Long buttonId : buttonIds) {
-            sysRoleButtonMapper.insertRoleButton(role, buttonId);
+            sysRoleButtonMapper.insertRoleButton(role.getId(), code, buttonId);
         }
-
         return Result.ok();
     }
 
@@ -151,17 +151,10 @@ public class RolePermissionController {
                 .toList();
     }
 
-    /**
-     * 权限校验：仅超级管理员可操作
-     */
     private void validateSuperAdmin(HttpServletRequest req) {
-        Long userId = (Long) req.getAttribute("userId");
-        if (userId == null) {
-            throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "请先登录");
-        }
-        SysUser user = sysUserMapper.selectById(userId);
-        if (user == null || !"SUPER_ADMIN".equals(user.getRole())) {
-            throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "仅超级管理员可操作角色权限");
+        String role = (String) req.getAttribute("role");
+        if (!"SUPER_ADMIN".equals(role)) {
+            throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "仅超级管理员可操作");
         }
     }
 }

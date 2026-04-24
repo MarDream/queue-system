@@ -166,8 +166,9 @@ function getFirstChar(text) {
   const ch = text.trim().charAt(0)
   if (!ch) return ''
   if (ch >= 'a' && ch <= 'z') return ch.toUpperCase()
-  if (ch >= 'A' && ch <= 'Z') return ch
-  return PINYIN_MAP[ch] || ''
+  if (ch >= 'A' && ch <= 'Z') return ch.toUpperCase()
+  const pinyin = PINYIN_MAP[ch] || ''
+  return pinyin ? pinyin.toUpperCase() : ''
 }
 
 // 名称输入处理：超过50字截断，编辑时不自动改前缀
@@ -181,10 +182,14 @@ function onNameInput(val) {
   }
 }
 
-// 前缀输入处理：超过5字符截断
+// 前缀输入处理：只允许大写字母，最多5位
 function onPrefixInput(val) {
-  if (val.length > 5) {
-    form.value.prefix = val.slice(0, 5)
+  // 过滤：只保留大写字母，自动转大写
+  const upper = val.toUpperCase().replace(/[^A-Z]/g, '')
+  if (upper.length > 5) {
+    form.value.prefix = upper.slice(0, 5)
+  } else {
+    form.value.prefix = upper
   }
 }
 
@@ -252,9 +257,18 @@ async function handleSave() {
     ElMessage.warning('请输入业务名称')
     return
   }
-  // 前端预校验：全局 name 和 prefix 不能重复（排除自身）
+  if (!form.value.prefix || !form.value.prefix.trim()) {
+    ElMessage.warning('请输入前缀')
+    return
+  }
+  // 前端预校验：前缀格式（1-5位大写字母）
+  const prefix = form.value.prefix.trim().toUpperCase()
+  if (!/^[A-Z]{1,5}$/.test(prefix)) {
+    ElMessage.warning('前缀仅允许1-5位大写字母')
+    return
+  }
+  // 前端预校验：全局 name 不能重复（排除自身）
   const normalizedName = form.value.name?.trim() ?? ''
-  const normalizedPrefix = form.value.prefix?.trim() ?? ''
   const dupByName = list.value.find(
     item => (item.name ?? '').trim() === normalizedName && item.id !== form.value.id
   )
@@ -262,8 +276,9 @@ async function handleSave() {
     ElMessage.warning('业务名称已存在')
     return
   }
+  // 前端预校验：前缀不能重复（排除自身）
   const dupByPrefix = list.value.find(
-    item => (item.prefix ?? '').trim() === normalizedPrefix && item.id !== form.value.id
+    item => (item.prefix ?? '').trim().toUpperCase() === prefix && item.id !== form.value.id
   )
   if (dupByPrefix) {
     ElMessage.warning('前缀已存在')

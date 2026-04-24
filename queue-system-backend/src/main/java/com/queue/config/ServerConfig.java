@@ -22,6 +22,9 @@ public class ServerConfig {
     @Value("${app.ip:}")
     private String configuredIp;
 
+    @Value("${app.frontend.base-url:}")
+    private String frontendBaseUrl;
+
     @Value("${app.cors.extra-origins:}")
     private String extraCorsOrigins;
 
@@ -38,7 +41,7 @@ public class ServerConfig {
         System.out.println("========================================");
         System.out.println("  Server IP  : " + localIp + (configuredIp != null && !configuredIp.isBlank() ? " (configured)" : " (auto-detect)"));
         System.out.println("  Backend    : http://" + localIp + ":" + serverPort);
-        System.out.println("  Frontend   : http://" + localIp + ":" + frontendPort);
+        System.out.println("  Frontend   : " + (frontendBaseUrl != null && !frontendBaseUrl.isBlank() ? frontendBaseUrl : "http://" + localIp + ":" + frontendPort));
         System.out.println("========================================");
     }
 
@@ -47,6 +50,10 @@ public class ServerConfig {
     }
 
     public String getFrontendBaseUrl() {
+        // 如果配置了前端基础URL，直接使用
+        if (frontendBaseUrl != null && !frontendBaseUrl.isBlank()) {
+            return frontendBaseUrl;
+        }
         return "http://" + localIp + ":" + frontendPort;
     }
 

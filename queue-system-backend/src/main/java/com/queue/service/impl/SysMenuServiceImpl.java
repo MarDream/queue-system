@@ -5,9 +5,11 @@ import com.queue.common.BusinessException;
 import com.queue.common.ResultCode;
 import com.queue.dto.UserMenuSortDTO;
 import com.queue.entity.SysMenu;
+import com.queue.entity.SysRole;
 import com.queue.entity.SysUserMenuSort;
 import com.queue.mapper.SysMenuMapper;
 import com.queue.mapper.SysRoleMenuMapper;
+import com.queue.mapper.SysRoleMapper;
 import com.queue.mapper.SysUserMenuSortMapper;
 import com.queue.service.SysMenuService;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +27,7 @@ public class SysMenuServiceImpl implements SysMenuService {
     private final SysMenuMapper sysMenuMapper;
     private final SysUserMenuSortMapper sysUserMenuSortMapper;
     private final SysRoleMenuMapper sysRoleMenuMapper;
+    private final SysRoleMapper sysRoleMapper;
 
     @Override
     public List<SysMenu> listAll() {
@@ -43,12 +46,10 @@ public class SysMenuServiceImpl implements SysMenuService {
     @Override
     @Transactional
     public void updateSortForUser(UserMenuSortDTO dto) {
-        // 删除旧排序
         sysUserMenuSortMapper.delete(
             new LambdaQueryWrapper<SysUserMenuSort>()
                 .eq(SysUserMenuSort::getUserId, dto.getUserId())
         );
-        // 插入新排序
         if (dto.getMenuIds() != null) {
             for (int i = 0; i < dto.getMenuIds().size(); i++) {
                 SysUserMenuSort sort = new SysUserMenuSort();
@@ -67,7 +68,6 @@ public class SysMenuServiceImpl implements SysMenuService {
         if (menu == null) {
             throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "菜单不存在");
         }
-        // 检查名称是否与其他菜单重复
         List<SysMenu> allMenus = sysMenuMapper.selectList(
             new LambdaQueryWrapper<SysMenu>().eq(SysMenu::getDeleted, 0)
         );
@@ -90,22 +90,18 @@ public class SysMenuServiceImpl implements SysMenuService {
         if (menu == null) {
             throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "菜单不存在");
         }
-        // 不能把自己设为自己的子菜单
         if (menuId.equals(parentId)) {
             throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "不能将菜单设为自己的子菜单");
         }
-        // 检查循环引用
         if (parentId != null) {
             if (wouldCreateCycle(menuId, parentId)) {
                 throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "不能将菜单设为其子菜单的后代");
             }
-            // 验证父菜单存在
             SysMenu parent = sysMenuMapper.selectById(parentId);
             if (parent == null || parent.getDeleted() == 1) {
                 throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "父菜单不存在");
             }
         }
-        // 使用 UpdateWrapper 确保 null 值也能更新
         sysMenuMapper.update(null,
             new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<SysMenu>()
                 .eq("id", menuId)
@@ -116,7 +112,6 @@ public class SysMenuServiceImpl implements SysMenuService {
     @Override
     @Transactional
     public void createGroup(String name) {
-        // 查询最大 sortOrder
         SysMenu maxSort = sysMenuMapper.selectOne(
             new LambdaQueryWrapper<SysMenu>()
                 .eq(SysMenu::getDeleted, 0)
@@ -144,7 +139,6 @@ public class SysMenuServiceImpl implements SysMenuService {
         if (!"group".equals(group.getType())) {
             throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "只能删除分组类型");
         }
-        // 检查分组下是否有子菜单
         long childCount = sysMenuMapper.selectCount(
             new LambdaQueryWrapper<SysMenu>()
                 .eq(SysMenu::getParentId, groupId)
@@ -153,16 +147,11 @@ public class SysMenuServiceImpl implements SysMenuService {
         if (childCount > 0) {
             throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "分组下有子菜单，无法删除");
         }
-        // 软删除分组
         group.setDeleted(1);
         sysMenuMapper.updateById(group);
     }
 
-    /**
-     * 检测将 menuId 的 parentId 设为 newParentId 是否会造成循环引用
-     */
     private boolean wouldCreateCycle(Long menuId, Long newParentId) {
-        // 从 newParentId 向上遍历，如果遇到 menuId 说明会形成循环
         Set<Long> visited = new HashSet<>();
         Long current = newParentId;
         while (current != null && !visited.contains(current)) {
@@ -180,7 +169,6 @@ public class SysMenuServiceImpl implements SysMenuService {
     @Override
     @Transactional
     public SysMenu createMenu(SysMenu menu) {
-        // 检查名称是否重复
         long count = sysMenuMapper.selectCount(
             new LambdaQueryWrapper<SysMenu>()
                 .eq(SysMenu::getDeleted, 0)
@@ -189,7 +177,6 @@ public class SysMenuServiceImpl implements SysMenuService {
         if (count > 0) {
             throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "菜单名称已存在");
         }
-        // 默认值
         if (menu.getSortOrder() == null) {
             SysMenu maxSort = sysMenuMapper.selectOne(
                 new LambdaQueryWrapper<SysMenu>()
@@ -203,8 +190,7 @@ public class SysMenuServiceImpl implements SysMenuService {
             menu.setType("menu");
         }
         sysMenuMapper.insert(menu);
-        // 自动将新菜单关联到超级管理员角色
-        sysRoleMenuMapper.insertRoleMenu("SUPER_ADMIN", menu.getId());
+        insertRoleMenuForSuperAdmin(menu.getId());
         return menu;
     }
 
@@ -215,7 +201,6 @@ public class SysMenuServiceImpl implements SysMenuService {
         if (existing == null || existing.getDeleted() == 1) {
             throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "菜单不存在");
         }
-        // 如果修改了名称，检查是否重复
         if (menu.getName() != null && !menu.getName().equals(existing.getName())) {
             long count = sysMenuMapper.selectCount(
                 new LambdaQueryWrapper<SysMenu>()
@@ -227,7 +212,6 @@ public class SysMenuServiceImpl implements SysMenuService {
                 throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "菜单名称已存在");
             }
         }
-        // 如果修改了 parentId，检查循环引用
         if (menu.getParentId() != null && !menu.getParentId().equals(existing.getParentId())) {
             if (menu.getId().equals(menu.getParentId()) || wouldCreateCycle(menu.getId(), menu.getParentId())) {
                 throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "无效的父菜单");
@@ -244,7 +228,6 @@ public class SysMenuServiceImpl implements SysMenuService {
         if (menu == null || menu.getDeleted() == 1) {
             throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "菜单不存在");
         }
-        // 分组类型需检查子项
         if ("group".equals(menu.getType())) {
             long childCount = sysMenuMapper.selectCount(
                 new LambdaQueryWrapper<SysMenu>()
@@ -264,36 +247,46 @@ public class SysMenuServiceImpl implements SysMenuService {
         return sysMenuMapper.selectById(id);
     }
 
-    /**
-     * 修复：确保指定菜单添加到超级管理员角色权限
-     * 用于数据库初始化后补充缺失的权限关联
-     */
     @Transactional
     public void ensureSuperAdminHasMenu(Long menuId) {
-        List<Long> existingMenus = sysRoleMenuMapper.selectMenuIdsByRole("SUPER_ADMIN");
+        SysRole superAdminRole = getSuperAdminRoleCached();
+        if (superAdminRole == null) return;
+        List<Long> existingMenus = sysRoleMenuMapper.selectMenuIdsByRoleId(superAdminRole.getId());
         if (existingMenus == null || !existingMenus.contains(menuId)) {
-            sysRoleMenuMapper.insertRoleMenu("SUPER_ADMIN", menuId);
+            sysRoleMenuMapper.insertRoleMenu(superAdminRole.getId(), "SUPER_ADMIN", menuId);
         }
     }
 
-    /**
-     * 修复：确保所有菜单都在超级管理员角色权限中
-     * 用于修复历史遗留的权限缺失问题
-     */
     @Transactional
     public void syncSuperAdminMenus() {
+        SysRole superAdminRole = getSuperAdminRoleCached();
+        if (superAdminRole == null) return;
         List<SysMenu> allMenus = sysMenuMapper.selectList(
             new LambdaQueryWrapper<SysMenu>()
                 .eq(SysMenu::getDeleted, 0)
         );
-        List<Long> existingMenus = sysRoleMenuMapper.selectMenuIdsByRole("SUPER_ADMIN");
+        List<Long> existingMenus = sysRoleMenuMapper.selectMenuIdsByRoleId(superAdminRole.getId());
         if (existingMenus == null) {
             existingMenus = List.of();
         }
         for (SysMenu menu : allMenus) {
             if (!existingMenus.contains(menu.getId())) {
-                sysRoleMenuMapper.insertRoleMenu("SUPER_ADMIN", menu.getId());
+                sysRoleMenuMapper.insertRoleMenu(superAdminRole.getId(), "SUPER_ADMIN", menu.getId());
             }
         }
+    }
+
+    private void insertRoleMenuForSuperAdmin(Long menuId) {
+        SysRole superAdminRole = getSuperAdminRoleCached();
+        if (superAdminRole == null) return;
+        sysRoleMenuMapper.insertRoleMenu(superAdminRole.getId(), "SUPER_ADMIN", menuId);
+    }
+
+    private SysRole getSuperAdminRoleCached() {
+        return sysRoleMapper.selectOne(
+            new LambdaQueryWrapper<SysRole>()
+                .eq(SysRole::getDeleted, 0)
+                .eq(SysRole::getCode, "SUPER_ADMIN")
+        );
     }
 }

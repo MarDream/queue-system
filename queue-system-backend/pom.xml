@@ -13,7 +13,7 @@
 
     <groupId>com.queue</groupId>
     <artifactId>queue-system-backend</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
     <name>queue-system-backend</name>
     <description>Queue Management System Backend</description>
 

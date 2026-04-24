@@ -17,7 +17,7 @@ WORKDIR /app
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 RUN mkdir -p /app/config
 
-COPY --from=builder /build/target/queue-system-backend-1.0.0.jar app.jar
+COPY --from=builder /build/target/queue-system-backend-1.0.1.jar app.jar
 RUN chown -R appuser:appgroup /app
 
 USER appuser

@@ -33,7 +33,7 @@ export const useUserStore = defineStore('user', () => {
     name.value = userData.name
     role.value = userData.role
     regionId.value = userData.regionId || null
-    regionCode.value = userData.regionCode || userData.regionId || null
+    regionCode.value = userData.regionCode || null
     regionName.value = userData.regionName || ''
     menuPaths.value = userData.menuPaths || []
     buttonCodes.value = userData.buttonCodes || []

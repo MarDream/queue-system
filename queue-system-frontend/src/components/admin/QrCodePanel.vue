@@ -474,7 +474,13 @@ async function generateQr() {
       ElMessage.error('未找到区域代码')
       return
     }
-    const res = await request.get('/qrcode/url', { params: { regionCode: region.code, userId: Number(userStore.userId) || undefined } })
+    const res = await request.get('/qrcode/url', {
+      params: {
+        regionCode: region.code,
+        userId: Number(userStore.userId) || undefined,
+        baseUrl: window.location.origin
+      }
+    })
 
     const qrItem = {
       id: res.id,
@@ -593,7 +599,11 @@ async function batchGenerate() {
 
     try {
       const res = await request.get('/qrcode/url', {
-        params: { regionCode: region.code, userId: Number(userStore.userId) || undefined }
+        params: {
+          regionCode: region.code,
+          userId: Number(userStore.userId) || undefined,
+          baseUrl: window.location.origin
+        }
       })
       qrList.value.unshift({
         id: res.id,
@@ -663,9 +673,40 @@ function downloadQr(item) {
 }
 
 function copyUrl(url) {
-  navigator.clipboard.writeText(url).then(() => {
+  if (!url) {
+    ElMessage.error('链接地址为空')
+    return
+  }
+
+  // 尝试使用 Clipboard API
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(() => {
+      ElMessage.success('链接已复制')
+    }).catch(() => {
+      // 备用方案：使用 textarea
+      fallbackCopyUrl(url)
+    })
+  } else {
+    // 备用方案
+    fallbackCopyUrl(url)
+  }
+}
+
+function fallbackCopyUrl(url) {
+  const textarea = document.createElement('textarea')
+  textarea.value = url
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  textarea.style.top = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  try {
+    document.execCommand('copy')
     ElMessage.success('链接已复制')
-  })
+  } catch {
+    ElMessage.error('复制失败，请手动复制')
+  }
+  document.body.removeChild(textarea)
 }
 
 function openPrintDialog() {

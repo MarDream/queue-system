@@ -19,7 +19,7 @@ export default defineConfig(({ mode }) => {
 
   // 优先使用环境变量 VITE_SERVER_IP，未配置则自动获取
   const serverIp = env.VITE_SERVER_IP || getLocalIp()
-  const backendPort = env.VITE_BACKEND_PORT || 8080
+  const backendPort = env.VITE_BACKEND_PORT || 8888
   const frontendPort = env.VITE_FRONTEND_PORT || 5173
   const source = env.VITE_SERVER_IP ? 'configured' : 'auto-detect'
 

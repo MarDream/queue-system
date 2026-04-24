@@ -384,6 +384,7 @@ public class TicketServiceImpl implements TicketService {
             vo.setCalledAt(t.getCalledAt());
             vo.setServedAt(t.getServedAt());
             vo.setCompletedAt(t.getCompletedAt());
+            vo.setSkipType(t.getSkipType());
             return vo;
         }).toList();
     }
@@ -398,6 +399,7 @@ public class TicketServiceImpl implements TicketService {
             || TicketStatus.CALLED.getValue().equals(status)
             || TicketStatus.SERVING.getValue().equals(status)) {
             ticket.setStatus(TicketStatus.SKIPPED.getValue());
+            ticket.setSkipType(com.queue.enums.SkipType.SYSTEM.getValue()); // 系统过号
             ticketMapper.updateById(ticket);
             // 从 Redis 队列移除
             queueService.dequeue(ticket.getRegionId(), ticket.getBusinessTypeId(), ticketId);
@@ -416,6 +418,7 @@ public class TicketServiceImpl implements TicketService {
         );
         for (Ticket ticket : expiredTickets) {
             ticket.setStatus(TicketStatus.SKIPPED.getValue());
+            ticket.setSkipType(com.queue.enums.SkipType.SYSTEM.getValue()); // 系统过号
             ticketMapper.updateById(ticket);
             queueService.dequeue(ticket.getRegionId(), ticket.getBusinessTypeId(), ticket.getId());
             queueService.decrementWaitingCount(ticket.getRegionId(), ticket.getBusinessTypeId());

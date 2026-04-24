@@ -45,6 +45,12 @@ public class QueueServiceImpl implements QueueService {
     }
 
     @Override
+    public void enqueueAtFront(Long regionId, Long businessTypeId, Long ticketId) {
+        String key = "queue:waiting:" + regionId + ":" + businessTypeId;
+        stringRedisTemplate.opsForList().leftPush(key, ticketId.toString());
+    }
+
+    @Override
     public void dequeue(Long regionId, Long businessTypeId, Long ticketId) {
         String key = "queue:waiting:" + regionId + ":" + businessTypeId;
         stringRedisTemplate.opsForList().remove(key, 1, ticketId.toString());

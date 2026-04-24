@@ -53,4 +53,22 @@ public class CounterController {
         counterService.togglePause(request.getCounterId());
         return Result.ok();
     }
+
+    @PostMapping("/reactivate")
+    public Result<Void> reactivate(@RequestBody ReactivateRequest request) {
+        counterService.reactivateSkippedTicket(request.getTicketNo());
+        return Result.ok();
+    }
+
+    public static class ReactivateRequest {
+        private String ticketNo;
+
+        public String getTicketNo() {
+            return ticketNo;
+        }
+
+        public void setTicketNo(String ticketNo) {
+            this.ticketNo = ticketNo;
+        }
+    }
 }

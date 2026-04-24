@@ -123,6 +123,26 @@ public class ScreenController {
         }).collect(Collectors.toList());
         resp.setCurrentCalls(currentCalls);
 
+        // waitingQueue: 等待中的票列表
+        List<ScreenDataResponse.WaitingTicketVO> waitingQueue = finalTodayTickets.stream()
+            .filter(t -> "waiting".equals(t.getStatus()))
+            .sorted((a, b) -> {
+                if (a.getCreatedAt() == null) return 1;
+                if (b.getCreatedAt() == null) return -1;
+                return a.getCreatedAt().compareTo(b.getCreatedAt());
+            })
+            .limit(100)
+            .map(t -> {
+                ScreenDataResponse.WaitingTicketVO vo = new ScreenDataResponse.WaitingTicketVO();
+                vo.setId(t.getId());
+                vo.setTicketNo(t.getTicketNo());
+                BusinessType bt = businessTypeMapper.selectById(t.getBusinessTypeId());
+                vo.setBusinessTypeName(bt != null ? bt.getName() : "");
+                return vo;
+            })
+            .collect(Collectors.toList());
+        resp.setWaitingQueue(waitingQueue);
+
         // counters list
         List<ScreenDataResponse.CounterStatusVO> counterVOs = counters.stream().map(c -> {
             ScreenDataResponse.CounterStatusVO vo = new ScreenDataResponse.CounterStatusVO();
@@ -143,9 +163,10 @@ public class ScreenController {
         }).collect(Collectors.toList());
         resp.setCounters(counterVOs);
 
-        // recentCalls: last 20 called/serving/completed/skipped
+        // recentCalls: 仅返回窗口人员主动跳过的票号
+        // 规则：状态为 skipped，且必须已经被窗口叫过号（calledAt != null）
         List<Ticket> recent = finalTodayTickets.stream()
-            .filter(t -> t.getCalledAt() != null)
+            .filter(t -> "skipped".equals(t.getStatus()) && t.getCalledAt() != null && t.getCounterId() != null)
             .sorted((a, b) -> b.getCalledAt().compareTo(a.getCalledAt()))
             .limit(20)
             .collect(Collectors.toList());
@@ -170,11 +191,19 @@ public class ScreenController {
         stats.setSkippedCount((int) finalTodayTickets.stream().filter(t -> "skipped".equals(t.getStatus())).count());
         resp.setStats(stats);
 
-        // 公告：按 regionCode 获取
+        // 公告和区域名：按 regionCode 获取
+        Region regionObj = null;
         if (regionCode != null && !regionCode.isEmpty()) {
-            Region region = regionMapper.selectOne(new QueryWrapper<Region>().eq("region_code", regionCode));
-            if (region != null && region.getAnnouncementText() != null) {
-                resp.setAnnouncementText(region.getAnnouncementText());
+            regionObj = regionMapper.selectOne(new QueryWrapper<Region>().eq("region_code", regionCode));
+            if (regionObj != null) {
+                if (regionObj.getAnnouncementText() != null) {
+                    resp.setAnnouncementText(regionObj.getAnnouncementText());
+                }
+                if (regionObj.getRegionName() != null) {
+                    resp.setRegionName(regionObj.getRegionName());
+                }
+                resp.setRegionId(regionObj.getId());
+                resp.setRegionCode(regionObj.getRegionCode());
             }
         }
 

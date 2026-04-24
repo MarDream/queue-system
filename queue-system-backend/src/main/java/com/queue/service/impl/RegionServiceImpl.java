@@ -117,7 +117,8 @@ public class RegionServiceImpl implements RegionService {
         if (!children.isEmpty()) {
             throw new BusinessException(ResultCode.SYSTEM_ERROR);
         }
-        regionMapper.deleteById(id);
+        // 物理删除（直接删除，不做软删除）
+        regionMapper.physicalDeleteById(id);
     }
 
     @Override

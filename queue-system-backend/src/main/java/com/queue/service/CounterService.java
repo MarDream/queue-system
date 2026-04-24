@@ -9,4 +9,10 @@ public interface CounterService {
     void serve(Long counterId);
     void complete(Long counterId);
     void togglePause(Long counterId);
+
+    /**
+     * 重新激活已过号票，将其放回等待队列队首
+     * @param ticketNo 票号
+     */
+    void reactivateSkippedTicket(String ticketNo);
 }

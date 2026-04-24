@@ -1,5 +1,5 @@
 import request from './index'
-import type { BusinessType, Counter, CounterDTO, Region, SysMenu, SysButton } from '../types'
+import type { BusinessType, Counter, CounterDTO, Region, SysMenu, SysButton, SysRole } from '../types'
 
 // 业务类型 API
 export const businessTypeApi = {
@@ -172,27 +172,33 @@ export const userPermissionApi = {
 
 // 角色权限 API
 export const rolePermissionApi = {
-  // 获取所有角色
-  listRoles: () =>
-    request.get('/admin/roles'),
+  list: () =>
+    request.get<SysRole[]>('/admin/roles'),
 
-  // 获取所有菜单
+  getById: (id: number) =>
+    request.get<SysRole>(`/admin/roles/${id}`),
+
+  create: (data: Partial<SysRole>) =>
+    request.post<SysRole>('/admin/roles', data),
+
+  update: (id: number, data: Partial<SysRole>) =>
+    request.put<SysRole>(`/admin/roles/${id}`, data),
+
+  delete: (id: number) =>
+    request.delete<void>(`/admin/roles/${id}`),
+
   listMenus: () =>
-    request.get('/admin/roles/menus'),
+    request.get<SysMenu[]>('/admin/roles/menus'),
 
-  // 获取角色的菜单权限
-  getRoleMenus: (role: string) =>
-    request.get(`/admin/roles/${role}/menus`),
-
-  // 获取角色的按钮权限
-  getRoleButtons: (role: string) =>
-    request.get(`/admin/roles/${role}/buttons`),
-
-  // 获取所有按钮
   listAllButtons: () =>
-    request.get('/admin/roles/buttons'),
+    request.get<SysButton[]>('/admin/roles/buttons'),
 
-  // 更新角色完整权限
-  updatePermissions: (role: string, data: { menuIds: number[]; buttonIds: number[] }) =>
-    request.put(`/admin/roles/${role}/permissions`, data)
+  getRoleMenus: (code: string) =>
+    request.get<number[]>(`/admin/roles/${code}/menus`),
+
+  getRoleButtons: (code: string) =>
+    request.get<number[]>(`/admin/roles/${code}/buttons`),
+
+  updatePermissions: (code: string, data: { menuIds: number[]; buttonIds: number[] }) =>
+    request.put<void>(`/admin/roles/${code}/permissions`, data)
 }

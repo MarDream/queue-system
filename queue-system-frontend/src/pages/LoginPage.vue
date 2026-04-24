@@ -20,7 +20,13 @@
         <div class="field-group">
           <label class="field-label">密码</label>
           <el-form-item prop="password">
-            <el-input v-model="form.password" type="password" placeholder="请输入密码" size="large" @keyup.enter="handleLogin" />
+            <el-input v-model="form.password" :type="showPassword ? 'text' : 'password'" placeholder="请输入密码" size="large" @keyup.enter="handleLogin">
+              <template #suffix>
+                <el-icon class="pwd-toggle" @click.stop="showPassword = !showPassword">
+                  <component :is="showPassword ? View : Hide" />
+                </el-icon>
+              </template>
+            </el-input>
           </el-form-item>
         </div>
 
@@ -44,12 +50,14 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
 import { useUserStore } from '../stores/user'
+import { View, Hide } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const userStore = useUserStore()
 
 const formRef = ref(null)
 const loading = ref(false)
+const showPassword = ref(false)
 
 const form = reactive({
   username: '',
@@ -165,6 +173,15 @@ events.forEach(event => {
 
 .field-group {
   margin-bottom: 20px;
+}
+
+.pwd-toggle {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.pwd-toggle:hover {
+  color: var(--primary);
 }
 
 .field-label {

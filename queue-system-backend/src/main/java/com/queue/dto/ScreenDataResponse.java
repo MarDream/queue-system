@@ -13,14 +13,19 @@ public class ScreenDataResponse {
     private List<CurrentCallVO> currentCalls;
     private List<CounterStatusVO> counters;
     private List<RecentCallVO> recentCalls;
+    private List<WaitingTicketVO> waitingQueue;
     private ScreenStatsVO stats;
     private String announcementText;
+    private String regionName;
+    private Long regionId;
+    private String regionCode;
 
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
     public static class CurrentCallVO {
         private String ticketNo;
+        private String counterId;
         private String counterName;
         private String calledAt;
         private String businessTypeName;
@@ -42,6 +47,15 @@ public class ScreenDataResponse {
         private String ticketNo;
         private String counterName;
         private String calledAt;
+        private String businessTypeName;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class WaitingTicketVO {
+        private Long id;
+        private String ticketNo;
         private String businessTypeName;
     }
 

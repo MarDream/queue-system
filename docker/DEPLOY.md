@@ -262,7 +262,7 @@ IMAGE_TAG=v1.0.3 docker compose -f docker-compose.standalone.yml up -d backend
 浏览器打开：
 
 ```text
-http://43.155.249.87
+https://zxmeng.asia/
 ```
 
 应能正常打开前端页面，并且刷新非首页路由不应返回 404。

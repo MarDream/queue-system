@@ -62,29 +62,32 @@ public class BusinessTypeServiceImpl implements BusinessTypeService {
 
     @Override
     public BusinessType create(BusinessType businessType) {
-        // Auto-generate prefix from name if not provided
         String name = businessType.getName() != null ? businessType.getName().trim() : "";
         if (name.isEmpty()) {
             throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE.getCode(), "业务名称不能为空");
         }
         businessType.setName(name);
 
-        // If prefix is empty or same as name (user didn't specify), auto-generate
-        String prefix = businessType.getPrefix() != null ? businessType.getPrefix().trim() : "";
+        // If prefix is empty, auto-generate from name
+        String prefix = businessType.getPrefix() != null ? businessType.getPrefix().trim().toUpperCase() : "";
         if (prefix.isEmpty()) {
             prefix = generateAvailablePrefix(name);
+        } else {
+            // Validate prefix format: max 5 uppercase letters only
+            if (!prefix.matches("^[A-Z]{1,5}$")) {
+                throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE.getCode(), "前缀仅允许1-5位大写字母");
+            }
+            // Check prefix uniqueness
+            BusinessType existingPrefix = businessTypeMapper.selectOne(
+                new QueryWrapper<BusinessType>().eq("prefix", prefix)
+            );
+            if (existingPrefix != null) {
+                throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE.getCode(), "前缀已存在");
+            }
         }
         businessType.setPrefix(prefix);
 
-        // Check prefix uniqueness (global)
-        BusinessType existingPrefix = businessTypeMapper.selectOne(
-            new QueryWrapper<BusinessType>().eq("prefix", prefix)
-        );
-        if (existingPrefix != null) {
-            throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE.getCode(), "前缀已存在");
-        }
-
-        // Check name uniqueness (global)
+        // Check name uniqueness
         BusinessType nameDup = businessTypeMapper.selectOne(
             new QueryWrapper<BusinessType>().eq("name", name)
         );
@@ -99,11 +102,12 @@ public class BusinessTypeServiceImpl implements BusinessTypeService {
     /**
      * Generate an available prefix from the business name.
      * Uses the first character's pinyin initial (uppercase).
-     * If taken, appends A-Z until available.
+     * If taken, appends letters until available.
      */
     private String generateAvailablePrefix(String name) {
         String initials = PinyinUtil.getPinyinInitials(name);
         char base = initials.isEmpty() ? 'X' : initials.charAt(0);
+        base = Character.toUpperCase(base);
 
         // Try single letter first
         BusinessType existing = businessTypeMapper.selectOne(
@@ -113,7 +117,7 @@ public class BusinessTypeServiceImpl implements BusinessTypeService {
             return String.valueOf(base);
         }
 
-        // Appended letter if taken
+        // Append letters if taken
         for (char c = 'A'; c <= 'Z'; c++) {
             String candidate = "" + base + c;
             existing = businessTypeMapper.selectOne(
@@ -132,23 +136,31 @@ public class BusinessTypeServiceImpl implements BusinessTypeService {
     public BusinessType update(BusinessType businessType) {
         BusinessType existing = businessTypeMapper.selectById(businessType.getId());
         if (existing == null) throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE);
-        // Normalize name and prefix
-        String normalizedPrefix = businessType.getPrefix().trim();
+
+        String normalizedPrefix = businessType.getPrefix().trim().toUpperCase();
         String normalizedName = businessType.getName() != null ? businessType.getName().trim() : "";
-        // Check prefix global uniqueness, excluding self
+
+        // Validate prefix format: max 5 uppercase letters only
+        if (!normalizedPrefix.matches("^[A-Z]{1,5}$")) {
+            throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE.getCode(), "前缀仅允许1-5位大写字母");
+        }
+
+        // Check prefix uniqueness, excluding self
         BusinessType dup = businessTypeMapper.selectOne(
             new QueryWrapper<BusinessType>()
                 .eq("prefix", normalizedPrefix)
                 .ne("id", businessType.getId())
         );
         if (dup != null) throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE.getCode(), "前缀已存在");
-        // Check name global uniqueness, excluding self (case-insensitive, whitespace-trimmed)
+
+        // Check name uniqueness, excluding self
         BusinessType nameDup = businessTypeMapper.selectOne(
             new QueryWrapper<BusinessType>()
                 .eq("name", normalizedName)
                 .ne("id", businessType.getId())
         );
         if (nameDup != null) throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE.getCode(), "业务名称已存在");
+
         businessType.setPrefix(normalizedPrefix);
         businessType.setName(normalizedName);
         businessTypeMapper.updateById(businessType);
@@ -168,8 +180,8 @@ public class BusinessTypeServiceImpl implements BusinessTypeService {
         counterBusinessMapper.delete(
             new QueryWrapper<CounterBusiness>().eq("business_type_id", id)
         );
-        // Delete business type
-        businessTypeMapper.deleteById(id);
+        // 物理删除（直接删除，不做软删除）
+        businessTypeMapper.physicalDeleteById(id);
     }
 
     @Override

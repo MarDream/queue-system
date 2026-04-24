@@ -22,4 +22,8 @@ public class StatisticsRequest {
     private String sortOrder;
     // 用户可见区域ID列表（用于权限过滤）
     private List<Long> allowedRegionIds;
+    // 票号状态筛选
+    private String status;
+    // 过号来源类型筛选 (manual/system)
+    private String skipType;
 }

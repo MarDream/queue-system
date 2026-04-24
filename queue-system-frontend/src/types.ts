@@ -56,3 +56,15 @@ export interface SysButton {
   code: string
   sortOrder: number
 }
+
+export interface SysRole {
+  id: number
+  code: string
+  name: string
+  description: string
+  sortOrder: number
+  type?: string
+  deleted?: number
+  createdAt?: string | any[]
+  updatedAt?: string | any[]
+}
