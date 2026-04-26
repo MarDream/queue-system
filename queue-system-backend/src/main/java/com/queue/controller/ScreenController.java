@@ -22,6 +22,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.Collections;
 import java.util.HashSet;
@@ -73,33 +75,49 @@ public class ScreenController {
         }
         final Set<Long> finalRegionFilter = regionFilter;
 
-        // Query today's tickets (按 regionFilter 过滤)
-        List<Ticket> unfilteredTickets = ticketMapper.selectList(
-            new QueryWrapper<Ticket>().apply("DATE(created_at) = CURDATE()")
-        );
-        List<Ticket> finalTodayTickets;
-        if (finalRegionFilter != null && !finalRegionFilter.isEmpty()) {
-            finalTodayTickets = unfilteredTickets.stream()
-                .filter(t -> t.getRegionId() != null && finalRegionFilter.contains(t.getRegionId()))
-                .collect(Collectors.toList());
-        } else if (finalRegionFilter != null) {
+        LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
+        LocalDateTime endOfDay = startOfDay.plusDays(1);
+
+        final List<Ticket> finalTodayTickets;
+        if (finalRegionFilter != null && finalRegionFilter.isEmpty()) {
             finalTodayTickets = Collections.emptyList();
         } else {
-            finalTodayTickets = unfilteredTickets;
+            QueryWrapper<Ticket> ticketQw = new QueryWrapper<Ticket>()
+                .ge("created_at", startOfDay)
+                .lt("created_at", endOfDay);
+            if (finalRegionFilter != null) {
+                ticketQw.in("region_id", finalRegionFilter);
+            }
+            finalTodayTickets = ticketMapper.selectList(ticketQw);
         }
 
-        // Counters (按 regionFilter 过滤)
-        List<Counter> allCounters = counterMapper.selectList(new QueryWrapper<Counter>());
-        List<Counter> counters;
-        if (finalRegionFilter != null && !finalRegionFilter.isEmpty()) {
-            counters = allCounters.stream()
-                .filter(c -> c.getRegionId() != null && finalRegionFilter.contains(c.getRegionId()))
-                .collect(Collectors.toList());
-        } else if (finalRegionFilter != null) {
+        final List<Counter> counters;
+        if (finalRegionFilter != null && finalRegionFilter.isEmpty()) {
             counters = Collections.emptyList();
+        } else if (finalRegionFilter != null) {
+            counters = counterMapper.selectList(new QueryWrapper<Counter>().in("region_id", finalRegionFilter));
         } else {
-            counters = allCounters;
+            counters = counterMapper.selectList(new QueryWrapper<Counter>());
         }
+
+        Map<Long, Counter> counterMap = counters.stream()
+            .filter(c -> c.getId() != null)
+            .collect(Collectors.toMap(Counter::getId, v -> v, (a, b) -> a));
+
+        Map<Long, Ticket> ticketMap = finalTodayTickets.stream()
+            .filter(t -> t.getId() != null)
+            .collect(Collectors.toMap(Ticket::getId, v -> v, (a, b) -> a));
+
+        List<Long> btIds = finalTodayTickets.stream()
+            .map(Ticket::getBusinessTypeId)
+            .filter(id -> id != null)
+            .distinct()
+            .toList();
+        Map<Long, BusinessType> btMap = btIds.isEmpty()
+            ? Collections.emptyMap()
+            : businessTypeMapper.selectBatchIds(btIds).stream()
+                .filter(bt -> bt.getId() != null)
+                .collect(Collectors.toMap(BusinessType::getId, v -> v, (a, b) -> a));
 
         // currentCalls: status in CALLED or SERVING
         List<Ticket> active = finalTodayTickets.stream()
@@ -114,10 +132,10 @@ public class ScreenController {
         List<ScreenDataResponse.CurrentCallVO> currentCalls = active.stream().map(t -> {
             ScreenDataResponse.CurrentCallVO vo = new ScreenDataResponse.CurrentCallVO();
             vo.setTicketNo(t.getTicketNo());
-            Counter c = counters.stream().filter(cn -> cn.getId().equals(t.getCounterId())).findFirst().orElse(null);
+            Counter c = t.getCounterId() != null ? counterMap.get(t.getCounterId()) : null;
             vo.setCounterName(c != null ? c.getName() : "");
             vo.setCalledAt(t.getCalledAt() != null ? t.getCalledAt().toLocalTime().toString() : "");
-            BusinessType bt = businessTypeMapper.selectById(t.getBusinessTypeId());
+            BusinessType bt = btMap.get(t.getBusinessTypeId());
             vo.setBusinessTypeName(bt != null ? bt.getName() : "");
             return vo;
         }).collect(Collectors.toList());
@@ -136,7 +154,7 @@ public class ScreenController {
                 ScreenDataResponse.WaitingTicketVO vo = new ScreenDataResponse.WaitingTicketVO();
                 vo.setId(t.getId());
                 vo.setTicketNo(t.getTicketNo());
-                BusinessType bt = businessTypeMapper.selectById(t.getBusinessTypeId());
+                BusinessType bt = btMap.get(t.getBusinessTypeId());
                 vo.setBusinessTypeName(bt != null ? bt.getName() : "");
                 return vo;
             })
@@ -149,7 +167,7 @@ public class ScreenController {
             vo.setName(c.getName());
             vo.setStatus(c.getStatus());
             if (c.getCurrentTicketId() != null) {
-                Ticket cur = finalTodayTickets.stream().filter(t -> t.getId().equals(c.getCurrentTicketId())).findFirst().orElse(null);
+                Ticket cur = ticketMap.get(c.getCurrentTicketId());
                 // 只有 called/serving 状态的票才显示票号，已完成/跳过/取消的不显示
                 if (cur != null && ("called".equals(cur.getStatus()) || "serving".equals(cur.getStatus()))) {
                     vo.setCurrentTicketNo(cur.getTicketNo());
@@ -174,10 +192,10 @@ public class ScreenController {
         List<ScreenDataResponse.RecentCallVO> recentCalls = recent.stream().map(t -> {
             ScreenDataResponse.RecentCallVO vo = new ScreenDataResponse.RecentCallVO();
             vo.setTicketNo(t.getTicketNo());
-            Counter c = counters.stream().filter(cn -> cn.getId().equals(t.getCounterId())).findFirst().orElse(null);
+            Counter c = t.getCounterId() != null ? counterMap.get(t.getCounterId()) : null;
             vo.setCounterName(c != null ? c.getName() : "");
             vo.setCalledAt(t.getCalledAt() != null ? t.getCalledAt().toLocalTime().toString() : "");
-            BusinessType bt = businessTypeMapper.selectById(t.getBusinessTypeId());
+            BusinessType bt = btMap.get(t.getBusinessTypeId());
             vo.setBusinessTypeName(bt != null ? bt.getName() : "");
             return vo;
         }).collect(Collectors.toList());
@@ -235,19 +253,20 @@ public class ScreenController {
         }
         final Set<Long> regionFilter = allowedRegionIds;
 
-        List<Ticket> unfilteredTickets = ticketMapper.selectList(
-            new QueryWrapper<Ticket>().apply("DATE(created_at) = CURDATE()")
-        );
-        // 按区域过滤（直接通过 regionId 过滤，等待中的票 counterId=null 也参与过滤）
+        LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
+        LocalDateTime endOfDay = startOfDay.plusDays(1);
+
         final List<Ticket> finalTodayTickets;
-        if (regionFilter != null && !regionFilter.isEmpty()) {
-            finalTodayTickets = unfilteredTickets.stream()
-                .filter(t -> t.getRegionId() != null && regionFilter.contains(t.getRegionId()))
-                .collect(Collectors.toList());
-        } else if (regionFilter != null) {
+        if (regionFilter != null && regionFilter.isEmpty()) {
             finalTodayTickets = Collections.emptyList();
         } else {
-            finalTodayTickets = unfilteredTickets;
+            QueryWrapper<Ticket> qw = new QueryWrapper<Ticket>()
+                .ge("created_at", startOfDay)
+                .lt("created_at", endOfDay);
+            if (regionFilter != null) {
+                qw.in("region_id", regionFilter);
+            }
+            finalTodayTickets = ticketMapper.selectList(qw);
         }
 
         resp.setTotalTickets(finalTodayTickets.size());

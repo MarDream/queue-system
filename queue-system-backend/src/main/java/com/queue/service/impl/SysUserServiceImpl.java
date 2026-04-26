@@ -5,9 +5,13 @@ import com.queue.common.BusinessException;
 import com.queue.common.ResultCode;
 import com.queue.dto.LoginRequest;
 import com.queue.dto.LoginVO;
+import com.queue.dto.PasswordResetConfirmRequest;
+import com.queue.dto.PasswordResetRequest;
+import com.queue.dto.RegisterRequest;
 import com.queue.dto.SysUserDTO;
 import com.queue.dto.UserMenuSortDTO;
 import com.queue.dto.UserPermissionDTO;
+import com.queue.config.ServerConfig;
 import com.queue.entity.SysButton;
 import com.queue.entity.SysMenu;
 import com.queue.entity.SysUser;
@@ -26,14 +30,23 @@ import com.queue.service.TicketService;
 import com.queue.util.JwtUtil;
 import com.queue.util.PasswordUtil;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.env.Environment;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.security.SecureRandom;
 import java.util.stream.Collectors;
 
 @Service
@@ -49,6 +62,17 @@ public class SysUserServiceImpl implements SysUserService {
     private final RegionMapper regionMapper;
     private final JwtUtil jwtUtil;
     private final TicketService ticketService;
+    private final StringRedisTemplate stringRedisTemplate;
+    private final JavaMailSender mailSender;
+    private final ServerConfig serverConfig;
+    private final Environment env;
+
+    private static final int USER_STATUS_PENDING = 0;
+    private static final int USER_STATUS_ACTIVE = 1;
+    private static final int USER_STATUS_DISABLED = 2;
+    private static final String PWD_RESET_CODE_KEY_PREFIX = "pwdreset:code:";
+    private static final String PWD_RESET_SENT_KEY_PREFIX = "pwdreset:sent:";
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     @Override
     public LoginVO login(LoginRequest request) {
@@ -62,7 +86,10 @@ public class SysUserServiceImpl implements SysUserService {
             throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "用户名或密码错误");
         }
 
-        if (user.getStatus() != 1) {
+        if (user.getStatus() == null || user.getStatus() != USER_STATUS_ACTIVE) {
+            if (user.getStatus() != null && user.getStatus() == USER_STATUS_PENDING) {
+                throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "账号待激活");
+            }
             throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "账号已被禁用");
         }
 
@@ -221,14 +248,36 @@ public class SysUserServiceImpl implements SysUserService {
             throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "用户名已存在");
         }
 
+        String normalizedEmail = null;
+        if (dto.getEmail() != null) {
+            String email = dto.getEmail().trim().toLowerCase();
+            if (!email.isEmpty()) {
+                normalizedEmail = email;
+            }
+        }
+        if (normalizedEmail != null) {
+            SysUser existEmail = sysUserMapper.selectOne(
+                new LambdaQueryWrapper<SysUser>()
+                    .eq(SysUser::getEmail, normalizedEmail)
+                    .eq(SysUser::getDeleted, 0)
+            );
+            if (existEmail != null) {
+                throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "邮箱已存在");
+            }
+        }
+
         SysUser user = new SysUser();
         user.setUsername(dto.getUsername());
         user.setPassword(PasswordUtil.encodeBCrypt(dto.getPassword()));
         user.setName(dto.getName());
+        user.setEmail(normalizedEmail);
         user.setRole(dto.getRole());
         user.setRegionId(dto.getRegionId());
-        user.setRegionCode(dto.getRegionCode());
-        user.setStatus(1);
+        user.setRegionCode(resolveRegionCode(dto.getRegionId()));
+        user.setStatus(dto.getStatus() == null ? USER_STATUS_PENDING : dto.getStatus());
+        if (user.getStatus() == USER_STATUS_ACTIVE) {
+            user.setActivatedAt(LocalDateTime.now());
+        }
 
         sysUserMapper.insert(user);
         return user;
@@ -243,10 +292,38 @@ public class SysUserServiceImpl implements SysUserService {
         }
 
         user.setName(dto.getName());
-        user.setRole(dto.getRole());
+        if (dto.getEmail() != null) {
+            String email = dto.getEmail().trim().toLowerCase();
+            if (!email.isEmpty()) {
+                SysUser existEmail = sysUserMapper.selectOne(
+                    new LambdaQueryWrapper<SysUser>()
+                        .eq(SysUser::getEmail, email)
+                        .eq(SysUser::getDeleted, 0)
+                        .ne(SysUser::getId, user.getId())
+                );
+                if (existEmail != null) {
+                    throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "邮箱已存在");
+                }
+                user.setEmail(email);
+            } else {
+                user.setEmail(null);
+            }
+        }
+
+        if (dto.getRole() != null && !dto.getRole().isBlank()) {
+            user.setRole(dto.getRole());
+        }
         user.setRegionId(dto.getRegionId());
-        user.setRegionCode(dto.getRegionCode());
-        user.setStatus(dto.getStatus());
+        user.setRegionCode(resolveRegionCode(dto.getRegionId()));
+        if (dto.getStatus() != null) {
+            if (user.getStatus() != null && user.getStatus() == USER_STATUS_PENDING && dto.getStatus() == USER_STATUS_ACTIVE) {
+                throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "待激活账号请通过激活操作启用");
+            }
+            user.setStatus(dto.getStatus());
+            if (dto.getStatus() == USER_STATUS_ACTIVE && (user.getActivatedAt() == null)) {
+                user.setActivatedAt(LocalDateTime.now());
+            }
+        }
 
         if (dto.getPassword() != null && !dto.getPassword().isEmpty()) {
             user.setPassword(PasswordUtil.encodeBCrypt(dto.getPassword()));
@@ -254,6 +331,267 @@ public class SysUserServiceImpl implements SysUserService {
 
         sysUserMapper.updateById(user);
         return user;
+    }
+
+    @Override
+    @Transactional
+    public SysUser register(RegisterRequest request) {
+        if (request == null) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "参数错误");
+        }
+        if (request.getUsername() == null || request.getUsername().isBlank()) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "请输入用户名");
+        }
+        if (request.getPassword() == null || request.getPassword().isBlank()) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "请输入密码");
+        }
+        if (request.getPassword().length() < 6) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "密码至少6位");
+        }
+        if (request.getEmail() == null || request.getEmail().isBlank()) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "请输入邮箱");
+        }
+        if (request.getRole() == null || request.getRole().isBlank()) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "请选择角色");
+        }
+        if ("SUPER_ADMIN".equals(request.getRole())) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "不允许注册超级管理员角色");
+        }
+        if (request.getRegionId() == null) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "请选择注册区域");
+        }
+
+        SysUser exist = sysUserMapper.selectOne(
+            new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getUsername, request.getUsername())
+                .eq(SysUser::getDeleted, 0)
+        );
+        if (exist != null) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "用户名已存在");
+        }
+
+        String email = request.getEmail().trim().toLowerCase();
+        SysUser existEmail = sysUserMapper.selectOne(
+            new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getEmail, email)
+                .eq(SysUser::getDeleted, 0)
+        );
+        if (existEmail != null) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "邮箱已存在");
+        }
+
+        SysUser user = new SysUser();
+        user.setUsername(request.getUsername());
+        user.setPassword(PasswordUtil.encodeBCrypt(request.getPassword()));
+        user.setName(request.getName());
+        user.setEmail(email);
+        user.setRole(request.getRole());
+        user.setRegionId(request.getRegionId());
+        user.setRegionCode(resolveRegionCode(request.getRegionId()));
+        user.setStatus(USER_STATUS_PENDING);
+        sysUserMapper.insert(user);
+        return user;
+    }
+
+    @Override
+    @Transactional
+    public void activateUser(Long operatorId, Long userId) {
+        SysUser operator = sysUserMapper.selectById(operatorId);
+        if (operator == null) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "未登录");
+        }
+        SysUser target = sysUserMapper.selectById(userId);
+        if (target == null || target.getDeleted() != null && target.getDeleted() == 1) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "用户不存在");
+        }
+        if (target.getStatus() != null && target.getStatus() == USER_STATUS_ACTIVE) {
+            return;
+        }
+        if (target.getStatus() == null || target.getStatus() != USER_STATUS_PENDING) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "当前账号状态不允许激活");
+        }
+        if ("SUPER_ADMIN".equals(operator.getRole())) {
+            target.setStatus(USER_STATUS_ACTIVE);
+            target.setActivatedBy(operatorId);
+            target.setActivatedAt(LocalDateTime.now());
+            sysUserMapper.updateById(target);
+            return;
+        }
+
+        if ("REGION_ADMIN".equals(operator.getRole())) {
+            if ("REGION_ADMIN".equals(target.getRole())) {
+                throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "区域管理员账号只能由超级管理员激活");
+            }
+            if (operator.getRegionId() == null || target.getRegionId() == null) {
+                throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "无权限激活该账号");
+            }
+            List<Long> allowed = getAllowedRegionIds(operator.getRegionId());
+            if (allowed == null || !allowed.contains(target.getRegionId())) {
+                throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "无权限激活该账号");
+            }
+            target.setStatus(USER_STATUS_ACTIVE);
+            target.setActivatedBy(operatorId);
+            target.setActivatedAt(LocalDateTime.now());
+            sysUserMapper.updateById(target);
+            return;
+        }
+        throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "无权限操作");
+    }
+
+    @Override
+    public void requestPasswordReset(PasswordResetRequest request) {
+        if (request == null) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "参数错误");
+        }
+        String email = request.getEmail() == null ? "" : request.getEmail().trim().toLowerCase();
+        String username = request.getUsername() == null ? "" : request.getUsername().trim();
+        if (email.isBlank() && username.isBlank()) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "请输入用户名或邮箱");
+        }
+
+        if (!email.isBlank()) {
+            requestPasswordResetByEmail(email);
+            return;
+        }
+
+        SysUser user = sysUserMapper.selectOne(
+            new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getUsername, username)
+                .eq(SysUser::getDeleted, 0)
+        );
+        if (user == null) {
+            return;
+        }
+        if (user.getEmail() == null || user.getEmail().isBlank()) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "该账号未绑定邮箱，请使用原密码重置或联系管理员进行密码重置");
+        }
+        requestPasswordResetByEmail(user.getEmail().trim().toLowerCase());
+    }
+
+    private void requestPasswordResetByEmail(String email) {
+        String sentKey = PWD_RESET_SENT_KEY_PREFIX + email;
+        Boolean locked = stringRedisTemplate.hasKey(sentKey);
+        if (Boolean.TRUE.equals(locked)) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "发送过于频繁，请稍后再试");
+        }
+
+        SysUser user = sysUserMapper.selectOne(
+            new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getEmail, email)
+                .eq(SysUser::getDeleted, 0)
+        );
+        if (user == null) {
+            stringRedisTemplate.opsForValue().set(sentKey, "1", 60, TimeUnit.SECONDS);
+            return;
+        }
+
+        String code = String.valueOf(100000 + SECURE_RANDOM.nextInt(900000));
+        String key = PWD_RESET_CODE_KEY_PREFIX + email;
+        stringRedisTemplate.opsForValue().set(key, code, 1, TimeUnit.DAYS);
+        stringRedisTemplate.opsForValue().set(sentKey, "1", 60, TimeUnit.SECONDS);
+
+        String resetUrl = serverConfig.getFrontendBaseUrl()
+            + "/reset-password?email="
+            + URLEncoder.encode(email, StandardCharsets.UTF_8)
+            + "&code="
+            + URLEncoder.encode(code, StandardCharsets.UTF_8);
+
+        SimpleMailMessage msg = new SimpleMailMessage();
+        String from = env.getProperty("spring.mail.username");
+        if (from != null && !from.isBlank()) {
+            msg.setFrom(from.trim());
+        }
+        msg.setTo(email);
+        msg.setSubject("排队叫号系统 - 密码重置验证码");
+        msg.setText("你正在重置「排队叫号系统」账号密码。\n\n"
+            + "验证码：" + code + "\n"
+            + "有效期：24小时\n\n"
+            + "点击链接重置密码：\n" + resetUrl + "\n\n"
+            + "如非本人操作，请忽略此邮件。");
+        try {
+            mailSender.send(msg);
+        } catch (Exception e) {
+            stringRedisTemplate.delete(key);
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "邮件发送失败，请联系管理员配置邮件服务");
+        }
+    }
+
+    @Override
+    @Transactional
+    public void changePassword(Long userId, String oldPassword, String newPassword) {
+        if (userId == null) {
+            throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "未登录");
+        }
+        if (oldPassword == null || oldPassword.isBlank()) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "请输入原密码");
+        }
+        if (newPassword == null || newPassword.isBlank()) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "请输入新密码");
+        }
+        if (newPassword.length() < 6) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "密码至少6位");
+        }
+        SysUser user = sysUserMapper.selectById(userId);
+        if (user == null || (user.getDeleted() != null && user.getDeleted() == 1)) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "账号不存在");
+        }
+        if (!new BCryptPasswordEncoder().matches(oldPassword, user.getPassword())) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "原密码不正确");
+        }
+        user.setPassword(PasswordUtil.encodeBCrypt(newPassword));
+        sysUserMapper.updateById(user);
+    }
+
+    @Override
+    @Transactional
+    public void confirmPasswordReset(PasswordResetConfirmRequest request) {
+        if (request == null) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "参数错误");
+        }
+        if (request.getEmail() == null || request.getEmail().isBlank()) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "请输入邮箱");
+        }
+        if (request.getCode() == null || request.getCode().isBlank()) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "请输入验证码");
+        }
+        if (request.getNewPassword() == null || request.getNewPassword().isBlank()) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "请输入新密码");
+        }
+        String newPassword = request.getNewPassword();
+        if (newPassword.length() < 6) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "密码至少6位");
+        }
+        String email = request.getEmail().trim().toLowerCase();
+        String key = PWD_RESET_CODE_KEY_PREFIX + email;
+        String expected = stringRedisTemplate.opsForValue().get(key);
+        if (expected == null || expected.isBlank()) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "验证码已过期或无效");
+        }
+        if (!expected.equals(request.getCode().trim())) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "验证码错误");
+        }
+        SysUser user = sysUserMapper.selectOne(
+            new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getEmail, email)
+                .eq(SysUser::getDeleted, 0)
+        );
+        if (user == null) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "账号不存在");
+        }
+        user.setPassword(PasswordUtil.encodeBCrypt(newPassword));
+        sysUserMapper.updateById(user);
+        stringRedisTemplate.delete(key);
+    }
+
+    private String resolveRegionCode(Long regionId) {
+        if (regionId == null) {
+            return null;
+        }
+        Region region = regionMapper.selectById(regionId);
+        if (region == null) {
+            return null;
+        }
+        return region.getRegionCode();
     }
 
     @Override

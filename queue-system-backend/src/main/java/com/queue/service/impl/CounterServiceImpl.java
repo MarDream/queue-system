@@ -20,6 +20,7 @@ import com.queue.service.QueueService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -65,11 +66,16 @@ public class CounterServiceImpl implements CounterService {
                 return null;
             }
 
+            LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
+            LocalDateTime endOfDay = startOfDay.plusDays(1);
+
             // 从数据库查询当前窗口支持业务类型中最早的等待票
             QueryWrapper<Ticket> wrapper = new QueryWrapper<>();
             wrapper.in("business_type_id", businessTypeIds)
+                   .eq("region_id", counter.getRegionId())
                    .eq("status", TicketStatus.WAITING.getValue())
-                   .apply("DATE(created_at) = CURDATE()")
+                   .ge("created_at", startOfDay)
+                   .lt("created_at", endOfDay)
                    .orderByAsc("created_at")
                    .last("LIMIT 1");
             Ticket bestTicket = ticketMapper.selectOne(wrapper);

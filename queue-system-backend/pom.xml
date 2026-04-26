@@ -114,6 +114,11 @@
             <artifactId>spring-boot-starter-security</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
+
         <!-- ZXing QR Code -->
         <dependency>
             <groupId>com.google.zxing</groupId>

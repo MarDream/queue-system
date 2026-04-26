@@ -74,6 +74,11 @@
             <span class="name-text">{{ row.name || '—' }}</span>
           </template>
         </el-table-column>
+        <el-table-column prop="email" label="邮箱" min-width="160" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="name-text">{{ row.email || '—' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="角色" width="140">
           <template #default="{ row }">
             <el-tag :type="getRoleType(row.role)" effect="light" round>
@@ -88,8 +93,8 @@
         </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small" effect="plain">
-              {{ row.status === 1 ? '启用' : '禁用' }}
+            <el-tag :type="statusTagType(row.status)" size="small" effect="plain">
+              {{ statusLabel(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -109,13 +114,14 @@
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
+                  <el-dropdown-item v-if="canActivate(row)" command="activate">激活</el-dropdown-item>
                   <el-dropdown-item command="edit">编辑</el-dropdown-item>
                   <el-dropdown-item command="resetPwd">重置密码</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePermissions(row)" command="permission" divided>权限配置</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
-            <el-button size="small" link type="danger" @click="handleDelete(row)" class="delete-icon-btn" title="删除">
+            <el-button v-if="canDelete(row)" size="small" link type="danger" @click="handleDelete(row)" class="delete-icon-btn" title="删除">
               <svg class="trash-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="3 6 5 6 21 6"/>
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
@@ -148,6 +154,9 @@
         <el-form-item label="姓名">
           <el-input v-model="form.name" placeholder="请输入姓名" />
         </el-form-item>
+        <el-form-item label="邮箱" prop="email">
+          <el-input v-model="form.email" placeholder="用于找回密码" />
+        </el-form-item>
         <el-form-item label="角色" prop="role">
           <el-select v-model="form.role" placeholder="请选择角色" style="width:100%" @change="onRoleChange">
             <el-option v-for="r in availableRoles" :key="r.value" :label="r.label" :value="r.value" />
@@ -169,7 +178,11 @@
           />
         </el-form-item>
         <el-form-item label="状态">
-          <el-switch v-model="form.status" :active-value="1" :inactive-value="0" />
+          <el-select v-model="form.status" style="width:100%" :disabled="statusSelectDisabled">
+            <el-option v-if="isEdit && form.status === 0" label="待激活" :value="0" />
+            <el-option label="启用" :value="1" />
+            <el-option label="禁用" :value="2" />
+          </el-select>
         </el-form-item>
         <el-form-item label="密码" v-if="!isEdit">
           <el-input v-model="form.password" type="password" show-password placeholder="请输入密码" />
@@ -263,6 +276,7 @@ watch(
 
 const list = ref([])
 const regions = ref([])
+const roles = ref([])
 const loading = ref(false)
 const dialogVisible = ref(false)
 const isEdit = ref(false)
@@ -317,6 +331,17 @@ const formRef = ref(null)
 
 const formRules = computed(() => ({
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
+  email: [{
+    validator: (rule, value, callback) => {
+      const v = String(value || '').trim()
+      if (v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+        callback(new Error('邮箱格式不正确'))
+        return
+      }
+      callback()
+    },
+    trigger: 'blur'
+  }],
   role: [{ required: true, message: '请选择角色', trigger: 'change' }],
   regionId: [{
     validator: (rule, value, callback) => {
@@ -335,6 +360,7 @@ const formRules = computed(() => ({
 const form = ref({
   username: '',
   name: '',
+  email: '',
   role: '',
   regionId: null,
   regionCode: '',
@@ -358,25 +384,17 @@ watch(
 
 // 按角色过滤可选角色（新增时不允许选超级管理员）
 const availableRoles = computed(() => {
+  const all = (roles.value || []).map(r => ({ label: r.name, value: r.code, type: r.type }))
   if (userStore.isSuperAdmin) {
     if (isEdit.value && form.value.role === 'SUPER_ADMIN') {
-      // 编辑已有超级管理员时保留该选项
-      return [
-        { label: '超级管理员', value: 'SUPER_ADMIN' },
-        { label: '区域管理员', value: 'REGION_ADMIN' },
-        { label: '窗口操作员', value: 'WINDOW_OPERATOR' }
-      ]
+      return all
     }
-    // 新增时或编辑非超级管理员时不允许选择超级管理员
-    return [
-      { label: '区域管理员', value: 'REGION_ADMIN' },
-      { label: '窗口操作员', value: 'WINDOW_OPERATOR' }
-    ]
+    return all.filter(r => r.value !== 'SUPER_ADMIN')
   }
-  // 区域管理员只能创建窗口操作员
-  return [
-    { label: '窗口操作员', value: 'WINDOW_OPERATOR' }
-  ]
+  if (userStore.isRegionAdmin) {
+    return all.filter(r => r.value !== 'SUPER_ADMIN' && r.value !== 'REGION_ADMIN')
+  }
+  return []
 })
 
 // 区域树形结构
@@ -443,7 +461,8 @@ const filteredList = computed(() => {
     const kw = searchKeyword.value.toLowerCase()
     result = result.filter(u =>
       u.username?.toLowerCase().includes(kw) ||
-      u.name?.toLowerCase().includes(kw)
+      u.name?.toLowerCase().includes(kw) ||
+      u.email?.toLowerCase().includes(kw)
     )
   }
   return result
@@ -475,6 +494,15 @@ async function fetchRegions() {
   }
 }
 
+async function fetchRoles() {
+  try {
+    const data = await request.get('/admin/roles')
+    roles.value = (data || []).slice().sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0))
+  } catch {
+    roles.value = []
+  }
+}
+
 function handleSearch() {
   // 搜索由 computed 属性处理
 }
@@ -497,6 +525,7 @@ function openCreate() {
   form.value = {
     username: '',
     name: '',
+    email: '',
     role: '',
     regionId: filterRegionId.value, // 自动带入筛选区域
     regionCode: '',
@@ -512,6 +541,7 @@ function openEdit(row) {
     id: row.id,
     username: row.username,
     name: row.name,
+    email: row.email || '',
     role: row.role,
     regionId: row.regionId,
     regionCode: '',
@@ -529,10 +559,24 @@ function openEdit(row) {
  */
 function handleAction(cmd, row) {
   switch (cmd) {
+    case 'activate': handleActivate(row); break
     case 'edit': openEdit(row); break
     case 'resetPwd': handleResetPwd(row); break
     case 'permission': openPermissionDialog(row); break
   }
+}
+
+const statusSelectDisabled = computed(() => {
+  if (form.value.status === 0) return true
+  if (!isEdit.value) return false
+  if (form.value.role === 'SUPER_ADMIN') return true
+  return Number(form.value.id) === Number(userStore.userId)
+})
+
+function canDelete(row) {
+  if (!userStore.isSuperAdmin) return false
+  if (row.role === 'SUPER_ADMIN') return false
+  return true
 }
 
 async function handleSave() {
@@ -563,6 +607,46 @@ async function handleSave() {
   } finally {
     saving.value = false
   }
+}
+
+function canActivate(row) {
+  if (row.status !== 0) return false
+  if (userStore.isSuperAdmin) return row.role !== 'SUPER_ADMIN'
+  if (userStore.isRegionAdmin) {
+    if (row.role === 'REGION_ADMIN' || row.role === 'SUPER_ADMIN') return false
+    if (!userStore.regionId || !row.regionId) return false
+    const allowedIds = getDescendantRegionIds(Number(userStore.regionId), regions.value)
+    allowedIds.add(Number(userStore.regionId))
+    return allowedIds.has(row.regionId)
+  }
+  return false
+}
+
+async function handleActivate(row) {
+  try {
+    await ElMessageBox.confirm(`确认激活账号 "${row.username}" 吗？激活后用户可登录系统。`, '确认激活', {
+      confirmButtonText: '激活',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    await request.post(`/admin/users/${row.id}/activate`)
+    ElMessage.success('已激活')
+    await fetchList()
+  } catch (err) {
+    if (err !== 'cancel') ElMessage.error(err.message || '激活失败')
+  }
+}
+
+function statusLabel(status) {
+  if (status === 1) return '启用'
+  if (status === 2) return '禁用'
+  return '待激活'
+}
+
+function statusTagType(status) {
+  if (status === 1) return 'success'
+  if (status === 2) return 'danger'
+  return 'warning'
 }
 
 async function handleResetPwd(row) {
@@ -616,6 +700,7 @@ function generateRandomPassword() {
 }
 
 async function handleDelete(row) {
+  if (!canDelete(row)) return
   try {
     await ElMessageBox.confirm(`确定要删除用户 "${row.username}" 吗？此操作不可恢复。`, '确认删除', {
       confirmButtonText: '删除',
@@ -682,6 +767,8 @@ async function handlePermSave() {
 }
 
 function getRoleName(role) {
+  const hit = (roles.value || []).find(r => r.code === role)
+  if (hit && hit.name) return hit.name
   const map = {
     SUPER_ADMIN: '超级管理员',
     REGION_ADMIN: '区域管理员',
@@ -716,6 +803,7 @@ function formatTime(time) {
 onMounted(() => {
   fetchList()
   fetchRegions()
+  fetchRoles()
 })
 </script>
 

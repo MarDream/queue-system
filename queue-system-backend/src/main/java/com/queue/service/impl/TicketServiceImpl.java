@@ -30,10 +30,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
+import java.time.format.DateTimeParseException;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -113,12 +115,17 @@ public class TicketServiceImpl implements TicketService {
         String ticketNo = null;
         Ticket ticket = null;
         try {
+            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime startOfDay = now.toLocalDate().atStartOfDay();
+            LocalDateTime endOfDay = startOfDay.plusDays(1);
+
             // 查找当日同手机号+同业务类型的所有记录（含已办结）
             List<Ticket> todayTickets = ticketMapper.selectList(
                 new QueryWrapper<Ticket>()
                     .eq("phone", maskedPhone)
                     .eq("business_type_id", request.getBusinessTypeId())
-                    .apply("DATE(created_at) = CURDATE()")
+                    .ge("created_at", startOfDay)
+                    .lt("created_at", endOfDay)
             );
 
             if (!todayTickets.isEmpty()) {
@@ -160,15 +167,15 @@ public class TicketServiceImpl implements TicketService {
             ticket.setTicketNo(ticketNo);
             ticket.setBusinessTypeId(request.getBusinessTypeId());
             ticket.setSource(TicketSource.ONLINE.getValue());
-            ticket.setPhone(PhoneUtil.mask(request.getPhone()));
+            ticket.setPhone(maskedPhone);
             ticket.setName(request.getName());
             ticket.setStatus(TicketStatus.WAITING.getValue());
-            ticket.setCreatedAt(LocalDateTime.now());
+            ticket.setCreatedAt(now);
             ticketMapper.insert(ticket);
 
             // 设置 Redis 过期 Key，当日午夜自动触发过号标记
             String expireKey = "ticket:expire:" + ticket.getId();
-            long secondsUntilMidnight = Duration.between(LocalDateTime.now(), LocalDateTime.now().toLocalDate().plusDays(1).atStartOfDay()).getSeconds();
+            long secondsUntilMidnight = Duration.between(now, endOfDay).getSeconds();
             if (secondsUntilMidnight > 0) {
                 stringRedisTemplate.opsForValue().set(expireKey, ticket.getTicketNo(), Duration.ofSeconds(secondsUntilMidnight));
             }
@@ -252,9 +259,31 @@ public class TicketServiceImpl implements TicketService {
                 .orderByDesc("created_at")
                 .last("LIMIT 50")
         );
+        List<Long> btIds = tickets.stream()
+            .map(Ticket::getBusinessTypeId)
+            .filter(id -> id != null)
+            .distinct()
+            .toList();
+        Map<Long, BusinessType> btMap = btIds.isEmpty()
+            ? Collections.emptyMap()
+            : businessTypeMapper.selectBatchIds(btIds).stream()
+                .filter(bt -> bt.getId() != null)
+                .collect(Collectors.toMap(BusinessType::getId, v -> v, (a, b) -> a));
+
+        List<Long> counterIds = tickets.stream()
+            .map(Ticket::getCounterId)
+            .filter(id -> id != null)
+            .distinct()
+            .toList();
+        Map<Long, Counter> counterMap = counterIds.isEmpty()
+            ? Collections.emptyMap()
+            : counterMapper.selectBatchIds(counterIds).stream()
+                .filter(c -> c.getId() != null)
+                .collect(Collectors.toMap(Counter::getId, v -> v, (a, b) -> a));
+
         return tickets.stream().map(t -> {
-            BusinessType bt = businessTypeMapper.selectById(t.getBusinessTypeId());
-            Counter counter = t.getCounterId() != null ? counterMapper.selectById(t.getCounterId()) : null;
+            BusinessType bt = btMap.get(t.getBusinessTypeId());
+            Counter counter = t.getCounterId() != null ? counterMap.get(t.getCounterId()) : null;
             MyTicketVO vo = new MyTicketVO();
             vo.setTicketNo(t.getTicketNo());
             vo.setStatus(t.getStatus());
@@ -331,17 +360,25 @@ public class TicketServiceImpl implements TicketService {
         if (status != null && !status.isEmpty()) {
             wrapper.eq("status", status);
         }
-        if (date != null && !date.isEmpty()) {
-            wrapper.apply("DATE(created_at) = {0}", date);
-        } else if ((startDate == null || startDate.isEmpty()) && (endDate == null || endDate.isEmpty())) {
-            // 默认当天
-            wrapper.apply("DATE(created_at) = CURDATE()");
-        }
-        if (startDate != null && !startDate.isEmpty()) {
-            wrapper.ge("DATE(created_at)", startDate);
-        }
-        if (endDate != null && !endDate.isEmpty()) {
-            wrapper.le("DATE(created_at)", endDate);
+        try {
+            if (date != null && !date.isEmpty()) {
+                LocalDate d = LocalDate.parse(date);
+                wrapper.ge("created_at", d.atStartOfDay())
+                       .lt("created_at", d.plusDays(1).atStartOfDay());
+            } else if ((startDate == null || startDate.isEmpty()) && (endDate == null || endDate.isEmpty())) {
+                LocalDate d = LocalDate.now();
+                wrapper.ge("created_at", d.atStartOfDay())
+                       .lt("created_at", d.plusDays(1).atStartOfDay());
+            }
+            if (startDate != null && !startDate.isEmpty()) {
+                LocalDate d = LocalDate.parse(startDate);
+                wrapper.ge("created_at", d.atStartOfDay());
+            }
+            if (endDate != null && !endDate.isEmpty()) {
+                LocalDate d = LocalDate.parse(endDate);
+                wrapper.lt("created_at", d.plusDays(1).atStartOfDay());
+            }
+        } catch (DateTimeParseException ignored) {
         }
         if (phone != null && !phone.isEmpty()) {
             wrapper.like("phone", phone);
@@ -361,15 +398,45 @@ public class TicketServiceImpl implements TicketService {
             Set<Long> filter = allowedRegionIds;
             tickets = tickets.stream().filter(t -> t.getRegionId() != null && filter.contains(t.getRegionId())).collect(Collectors.toList());
         }
+
+        List<Long> btIds = tickets.stream()
+            .map(Ticket::getBusinessTypeId)
+            .filter(id -> id != null)
+            .distinct()
+            .toList();
+        Map<Long, BusinessType> btMap = btIds.isEmpty()
+            ? Collections.emptyMap()
+            : businessTypeMapper.selectBatchIds(btIds).stream()
+                .filter(bt -> bt.getId() != null)
+                .collect(Collectors.toMap(BusinessType::getId, v -> v, (a, b) -> a));
+
+        List<Long> counterIds = tickets.stream()
+            .map(Ticket::getCounterId)
+            .filter(id -> id != null)
+            .distinct()
+            .toList();
+        Map<Long, Counter> counterMap = counterIds.isEmpty()
+            ? Collections.emptyMap()
+            : counterMapper.selectBatchIds(counterIds).stream()
+                .filter(c -> c.getId() != null)
+                .collect(Collectors.toMap(Counter::getId, v -> v, (a, b) -> a));
+
+        List<Long> regionIds = tickets.stream()
+            .map(Ticket::getRegionId)
+            .filter(id -> id != null)
+            .distinct()
+            .toList();
+        Map<Long, Region> regionMap = regionIds.isEmpty()
+            ? Collections.emptyMap()
+            : regionMapper.selectBatchIds(regionIds).stream()
+                .filter(r -> r.getId() != null)
+                .collect(Collectors.toMap(Region::getId, v -> v, (a, b) -> a));
+
         return tickets.stream().map(t -> {
-            BusinessType bt = businessTypeMapper.selectById(t.getBusinessTypeId());
-            Counter counter = t.getCounterId() != null ? counterMapper.selectById(t.getCounterId()) : null;
-            // 通过 region_id 查询区域名称
-            String regionName = null;
-            if (t.getRegionId() != null) {
-                Region region = regionMapper.selectById(t.getRegionId());
-                regionName = region != null ? region.getRegionName() : null;
-            }
+            BusinessType bt = btMap.get(t.getBusinessTypeId());
+            Counter counter = t.getCounterId() != null ? counterMap.get(t.getCounterId()) : null;
+            Region region = t.getRegionId() != null ? regionMap.get(t.getRegionId()) : null;
+            String regionName = region != null ? region.getRegionName() : null;
             AdminTicketVO vo = new AdminTicketVO();
             vo.setId(t.getId());
             vo.setTicketNo(t.getTicketNo());
@@ -411,10 +478,11 @@ public class TicketServiceImpl implements TicketService {
     @Transactional
     public int markExpiredTickets() {
         // 查询所有非当日且仍处于未办结状态的票
+        LocalDateTime startOfToday = LocalDate.now().atStartOfDay();
         List<Ticket> expiredTickets = ticketMapper.selectList(
             new QueryWrapper<Ticket>()
                 .in("status", TicketStatus.WAITING.getValue(), TicketStatus.CALLED.getValue(), TicketStatus.SERVING.getValue())
-                .apply("DATE(created_at) < CURDATE()")
+                .lt("created_at", startOfToday)
         );
         for (Ticket ticket : expiredTickets) {
             ticket.setStatus(TicketStatus.SKIPPED.getValue());

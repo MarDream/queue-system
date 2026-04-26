@@ -7,8 +7,16 @@ const SESSION_TIMEOUT_MS = 60 * 60 * 1000 // 1小时
 const SESSION_CHECK_INTERVAL_MS = 60 * 1000 // 每分钟检测一次
 const SESSION_ACTIVITY_KEY = 'lastActivityTime'
 
+function normalizeToken(raw) {
+  if (!raw) return ''
+  const trimmed = String(raw).trim()
+  if (!trimmed) return ''
+  if (trimmed === 'undefined' || trimmed === 'null') return ''
+  return trimmed
+}
+
 export const useUserStore = defineStore('user', () => {
-  const token = ref(localStorage.getItem('token') || '')
+  const token = ref(normalizeToken(localStorage.getItem('token')))
   const userId = ref(localStorage.getItem('userId') || null)
   const username = ref(localStorage.getItem('username') || '')
   const name = ref(localStorage.getItem('name') || '')
@@ -27,7 +35,7 @@ export const useUserStore = defineStore('user', () => {
   const isWindowOperator = computed(() => role.value === 'WINDOW_OPERATOR')
 
   function setUser(userData) {
-    token.value = userData.token
+    token.value = normalizeToken(userData.token)
     userId.value = userData.userId
     username.value = userData.username
     name.value = userData.name
@@ -39,7 +47,11 @@ export const useUserStore = defineStore('user', () => {
     buttonCodes.value = userData.buttonCodes || []
 
     // Save to localStorage
-    localStorage.setItem('token', userData.token)
+    if (token.value) {
+      localStorage.setItem('token', token.value)
+    } else {
+      localStorage.removeItem('token')
+    }
     localStorage.setItem('userId', userData.userId)
     localStorage.setItem('username', userData.username)
     localStorage.setItem('name', userData.name)

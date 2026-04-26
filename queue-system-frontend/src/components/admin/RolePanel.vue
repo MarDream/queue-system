@@ -69,7 +69,7 @@
       </template>
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="90px">
         <el-form-item label="角色编码" prop="code">
-          <el-input v-model="form.code" placeholder="如：WINDOW_OPERATOR" :disabled="isEdit" />
+          <el-input v-model="form.code" placeholder="留空系统按角色名称生成（如：SUPER_ADMIN）" :disabled="isEdit" />
         </el-form-item>
         <el-form-item label="角色名称" prop="name">
           <el-input v-model="form.name" placeholder="如：窗口操作员" />
@@ -168,7 +168,6 @@ const form = ref({
 })
 
 const formRules = {
-  code: [{ required: true, message: '请输入角色编码', trigger: 'blur' }],
   name: [{ required: true, message: '请输入角色名称', trigger: 'blur' }]
 }
 
@@ -221,11 +220,19 @@ async function handleSave() {
   }
   saving.value = true
   try {
+    const payload = { ...form.value }
+    if (!isEdit.value) {
+      if (!payload.code || !String(payload.code).trim()) {
+        delete payload.code
+      } else {
+        payload.code = String(payload.code).trim()
+      }
+    }
     if (isEdit.value) {
-      await rolePermissionApi.update(form.value.id, form.value)
+      await rolePermissionApi.update(form.value.id, payload)
       ElMessage.success('角色已更新')
     } else {
-      await rolePermissionApi.create(form.value)
+      await rolePermissionApi.create(payload)
       ElMessage.success('角色已创建')
     }
     dialogVisible.value = false
@@ -249,7 +256,13 @@ async function handleDelete(row) {
     ElMessage.success('删除成功')
     await fetchList()
   } catch (e) {
-    if (e !== 'cancel') ElMessage.error(e.message || '删除失败')
+    if (e === 'cancel') return
+    const msg = e?.message || '删除失败'
+    if (msg.includes('有用户正在使用') || msg.includes('不能删除角色')) {
+      ElMessageBox.alert(msg, '无法删除', { type: 'warning', confirmButtonText: '我知道了' })
+      return
+    }
+    ElMessage.error(msg)
   }
 }
 

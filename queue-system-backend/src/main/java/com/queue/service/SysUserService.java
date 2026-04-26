@@ -2,6 +2,9 @@ package com.queue.service;
 
 import com.queue.dto.LoginRequest;
 import com.queue.dto.LoginVO;
+import com.queue.dto.PasswordResetConfirmRequest;
+import com.queue.dto.PasswordResetRequest;
+import com.queue.dto.RegisterRequest;
 import com.queue.dto.SysUserDTO;
 import com.queue.dto.UserMenuSortDTO;
 import com.queue.dto.UserPermissionDTO;
@@ -23,6 +26,11 @@ public interface SysUserService {
     String resetPassword(Long id);
 
     String resetPasswordWithCustomPassword(Long id, String customPassword);
+    SysUser register(RegisterRequest request);
+    void activateUser(Long operatorId, Long userId);
+    void requestPasswordReset(PasswordResetRequest request);
+    void confirmPasswordReset(PasswordResetConfirmRequest request);
+    void changePassword(Long userId, String oldPassword, String newPassword);
     void updateMenuSort(UserMenuSortDTO dto);
     List<String> getMenuPathsByRole(String role);
     List<String> getButtonCodesByRole(String role);

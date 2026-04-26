@@ -33,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
@@ -357,10 +358,13 @@ public class AdminController {
         }
 
         // 今日该窗口的票
+        LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
+        LocalDateTime endOfDay = startOfDay.plusDays(1);
         List<Ticket> todayTickets = ticketMapper.selectList(
             new QueryWrapper<Ticket>()
                 .eq("counter_id", id)
-                .apply("DATE(created_at) = CURDATE()")
+                .ge("created_at", startOfDay)
+                .lt("created_at", endOfDay)
         );
 
         // 统计

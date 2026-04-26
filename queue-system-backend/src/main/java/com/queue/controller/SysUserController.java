@@ -37,18 +37,87 @@ public class SysUserController {
     }
 
     @PostMapping
-    public Result<SysUser> create(@RequestBody SysUserDTO dto) {
+    public Result<SysUser> create(@RequestBody SysUserDTO dto, jakarta.servlet.http.HttpServletRequest request) {
+        Long operatorId = (Long) request.getAttribute("userId");
+        SysUser operator = operatorId == null ? null : sysUserService.getById(operatorId);
+        if (operator == null) {
+            return Result.error(401, "未登录");
+        }
+        if ("SUPER_ADMIN".equals(dto.getRole())) {
+            return Result.error(400, "不允许创建超级管理员账号");
+        }
+        if ("REGION_ADMIN".equals(operator.getRole())) {
+            if ("REGION_ADMIN".equals(dto.getRole())) {
+                return Result.error(400, "区域管理员不允许创建区域管理员账号");
+            }
+        }
+        if (dto.getStatus() == null || dto.getStatus() == 0) {
+            dto.setStatus(1);
+        }
         return Result.ok(sysUserService.create(dto));
     }
 
     @PutMapping("/{id}")
-    public Result<SysUser> update(@PathVariable Long id, @RequestBody SysUserDTO dto) {
+    public Result<SysUser> update(@PathVariable Long id, @RequestBody SysUserDTO dto, jakarta.servlet.http.HttpServletRequest request) {
         dto.setId(id);
+        Long operatorId = (Long) request.getAttribute("userId");
+        SysUser operator = operatorId == null ? null : sysUserService.getById(operatorId);
+        if (operator == null) {
+            return Result.error(401, "未登录");
+        }
+        SysUser target = sysUserService.getById(id);
+        if (target == null) {
+            return Result.error(400, "用户不存在");
+        }
+
+        if ("SUPER_ADMIN".equals(operator.getRole())) {
+            if (operatorId != null && operatorId.equals(id) && dto.getStatus() != null && dto.getStatus() == 2) {
+                return Result.error(400, "超级管理员不能禁用自己");
+            }
+            if ("SUPER_ADMIN".equals(target.getRole())) {
+                if (dto.getStatus() != null && dto.getStatus() == 2) {
+                    return Result.error(400, "不允许禁用超级管理员");
+                }
+                if (dto.getRole() != null && !dto.getRole().isBlank() && !"SUPER_ADMIN".equals(dto.getRole())) {
+                    return Result.error(400, "不允许修改超级管理员角色");
+                }
+            }
+        }
+
+        if ("SUPER_ADMIN".equals(dto.getRole())) {
+            return Result.error(400, "不允许将用户设置为超级管理员");
+        }
+        if ("REGION_ADMIN".equals(operator.getRole())) {
+            if (!operator.getId().equals(id) && !"WINDOW_OPERATOR".equals(target.getRole())) {
+                return Result.error(ResultCode.UNAUTHORIZED.getCode(), "仅允许管理窗口操作员用户");
+            }
+            if ("REGION_ADMIN".equals(dto.getRole())) {
+                return Result.error(400, "区域管理员不允许将用户设置为区域管理员");
+            }
+        }
         return Result.ok(sysUserService.update(dto));
     }
 
     @DeleteMapping("/{id}")
-    public Result<Void> delete(@PathVariable Long id) {
+    public Result<Void> delete(@PathVariable Long id, HttpServletRequest request) {
+        Long operatorId = (Long) request.getAttribute("userId");
+        SysUser operator = operatorId == null ? null : sysUserService.getById(operatorId);
+        if (operator == null) {
+            return Result.error(401, "未登录");
+        }
+        if (!"SUPER_ADMIN".equals(operator.getRole())) {
+            return Result.error(ResultCode.UNAUTHORIZED.getCode(), "仅超级管理员可删除用户");
+        }
+        if (operator.getId().equals(id)) {
+            return Result.error(400, "超级管理员不能删除自己");
+        }
+        SysUser target = sysUserService.getById(id);
+        if (target == null) {
+            return Result.error(400, "用户不存在");
+        }
+        if ("SUPER_ADMIN".equals(target.getRole())) {
+            return Result.error(400, "不允许删除超级管理员");
+        }
         sysUserService.delete(id);
         return Result.ok();
     }
@@ -88,6 +157,16 @@ public class SysUserController {
         dto.setUserId(id);
         Long operatorId = (Long) request.getAttribute("userId");
         sysUserService.setUserPermissions(operatorId, dto);
+        return Result.ok();
+    }
+
+    @PostMapping("/{id}/activate")
+    public Result<Void> activate(@PathVariable Long id, jakarta.servlet.http.HttpServletRequest request) {
+        Long operatorId = (Long) request.getAttribute("userId");
+        if (operatorId == null) {
+            return Result.error(401, "未登录");
+        }
+        sysUserService.activateUser(operatorId, id);
         return Result.ok();
     }
 

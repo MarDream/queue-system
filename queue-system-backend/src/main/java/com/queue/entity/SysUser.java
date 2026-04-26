@@ -12,11 +12,14 @@ public class SysUser {
     private String username;
     private String password;
     private String name;
+    private String email;
     private String role;
     private Long regionId;             // 所属区域ID
     private String regionCode;         // 区域代码（冗余，方便登录上下文查询）
     private Integer status;
     private LocalDateTime lastLoginAt;
+    private Long activatedBy;
+    private LocalDateTime activatedAt;
     @Version
     private Integer version;
     @TableLogic
