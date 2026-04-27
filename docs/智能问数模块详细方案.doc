@@ -1,0 +1,205 @@
+{\rtf1\ansi\deff0\uc1\viewkind4
+{\fonttbl{\f0\fswiss Arial;}{\f1\fcharset134 SimSun;}}
+\pard\f1\fs28\b 智能问数模块详细方案（独立模块）\b0\fs24\par
+\pard\f1\fs24
+版本：V1.0\par
+日期：2026-04-26\par
+\par
+\b 1. 背景与目标\b0\par
+1.1 背景\par
+现有排队系统已具备取号、叫号、服务、办结、过号、统计分析等功能。管理端与窗口工作台均存在“快速获得数据结论”的需求，但传统报表需要用户理解筛选、指标口径和维度配置，使用门槛较高。\par
+\par
+1.2 目标（MVP）\par
+（1）在管理端提供“智能问数”独立入口，通过自然语言问答快速获取 KPI、排行、趋势与受控明细。\par
+（2）在窗口工作台提供“智能问数”抽屉入口，默认仅支持“本窗口范围”的聚合分析，保障业务边界。\par
+（3）引入权限、数据范围（scope）、默认时间范围与上限等治理机制，确保可控、可审计、可回归。\par
+\par
+1.3 非目标（MVP 不做）\par
+（1）不做通用 Text2SQL（自由生成 SQL）。\par
+（2）不做任意字段组合的自由报表建模。\par
+（3）不做跨系统数据融合。\par
+\par
+\b 2. 总体设计原则\b0\par
+（1）模板优先：意图识别 → DSL → 模板查询（SQL/Mapper）→ 结果 → 图表/表格/卡片。\par
+（2）后端强制注入：capabilities（能力）与 scope（范围）由后端计算覆盖写入，前端与模型输出均不可信。\par
+（3）口径固定：每个指标绑定固定时间字段与过滤口径，避免同口径不同算。\par
+（4）最小授权：明细、导出默认关闭，按需授权；窗口工作台默认仅本窗口范围。\par
+（5）可审计可回归：记录问题、解析、DSL、范围、返回行数、耗时与执行结果，用于排错与优化。\par
+\par
+\b 3. 双入口与工作空间（Workspace）\b0\par
+3.1 入口形态\par
+（1）管理端（Admin）：侧边栏菜单“智能问数” → 独立页面。\par
+（2）窗口工作台（Counter）：按钮“智能问数” → 右侧抽屉。\par
+\par
+3.2 Workspace 定义\par
+（1）workspace=admin：用于全局/区域/窗口维度的运营分析。\par
+（2）workspace=counter：用于本窗口日常分析与排查，默认强制 scope=本窗口。\par
+\par
+3.3 会话隔离\par
+对话历史按 workspace 隔离（同一用户在 admin 与 counter 有不同对话列表）。\par
+\par
+\b 4. 权限模型与能力开关\b0\par
+4.1 复用系统现有权限模型\par
+使用现有菜单权限（sys_menu）与按钮权限（sys_button）。\par
+\par
+4.2 权限点清单\par
+菜单：智能问数（控制管理端入口可见）。\par
+按钮：\par
+（1）AI_QUERY:DETAIL  票号明细（默认关闭，超级管理员可授权）。\par
+（2）AI_QUERY:EXPORT  导出（窗口操作员默认关闭，按需授权）。\par
+（3）AI_QUERY:ADMIN   智能问数配置管理（仅超级管理员）。\par
+\par
+4.3 角色默认策略\par
+SUPER_ADMIN：DETAIL/EXPORT/ADMIN 默认开启。\par
+REGION_ADMIN：EXPORT 可默认开启；DETAIL 默认关闭（按需授权）；ADMIN 关闭。\par
+WINDOW_OPERATOR：DETAIL 默认关闭；EXPORT 默认关闭；ADMIN 关闭。\par
+\par
+\b 5. 数据范围（Scope）治理\b0\par
+5.1 核心结论\par
+（1）窗口操作员默认仅本窗口：effectiveCounterIds。\par
+（2）区域管理员默认自身+子区域汇总；其他区域需超级管理员赋权。\par
+\par
+5.2 Scope 计算规则（后端强制）\par
+（1）SUPER_ADMIN：scope=ALL。\par
+（2）REGION_ADMIN：effectiveRegionIds = descendants(自身区域) ∪ descendants(授权区域根节点集合)。\par
+（3）WINDOW_OPERATOR：effectiveCounterIds = 我的负责窗口集合（默认仅当前/绑定窗口）。\par
+\par
+5.3 授权跨区域（建议数据表，供后续实现）\par
+表：sys_user_region_scope（user_id, region_id, created_by, created_at）。\par
+含义：授予用户额外“区域根节点”，并自动包含其子区域。\par
+\par
+\b 6. 默认时间范围与上限（可配置）\b0\par
+6.1 目标\par
+避免写死时间范围；由超级管理员配置默认范围与最大范围，满足业务灵活性并保护系统性能。\par
+\par
+6.2 建议配置项（存放于 sys_config 或同类配置中心）\par
+（1）AI_QUERY.DEFAULT_TIME_RANGE.SUPER_ADMIN = last_7_days\par
+（2）AI_QUERY.DEFAULT_TIME_RANGE.REGION_ADMIN = today\par
+（3）AI_QUERY.DEFAULT_TIME_RANGE.WINDOW_OPERATOR = today\par
+（4）AI_QUERY.MAX_RANGE_DAYS.SUPER_ADMIN = 365\par
+（5）AI_QUERY.MAX_RANGE_DAYS.REGION_ADMIN = 90\par
+（6）AI_QUERY.MAX_RANGE_DAYS.WINDOW_OPERATOR = 30\par
+（7）AI_QUERY.MAX_ROWS.DETAIL = 200（封顶 200）\par
+（8）AI_QUERY.MAX_ROWS.AGG = 5000（按角色可细分）\par
+\par
+6.3 强制规则\par
+（1）用户未指定 timeRange：自动补默认值。\par
+（2）用户指定范围超过 maxRangeDays：裁剪到最大范围并提示。\par
+（3）明细 limit 强制封顶 200。\par
+\par
+\b 7. 查询类型与输出形态\b0\par
+7.1 查询类型（queryType）\par
+（1）kpi：返回 1~6 个数（卡片）。\par
+（2）rank：TopN 表格 + 柱状图（可选）。\par
+（3）trend：时间序列（折线图）。\par
+（4）detail：票号级列表（受控，需授权）。\par
+\par
+7.2 图表默认建议\par
+kpi：卡片。\par
+rank：bar。\par
+trend：line。\par
+detail：table。\par
+\par
+\b 8. DSL 设计（Text2DSL，不是 Text2SQL）\b0\par
+8.1 目标\par
+将自然语言稳定映射到结构化 DSL，并由后端用模板查询执行。\par
+\par
+8.2 DSL 结构（示例字段）\par
+字段说明：\par
+workspace：admin/counter。\par
+intent：意图编码。\par
+queryType：kpi/rank/trend/detail。\par
+metric：指标编码。\par
+dimensions：维度集合（如 business_type、counter、date、hour）。\par
+filters：过滤条件（status、skipType、businessTypeIds、regionIds、counterIds 等）。\par
+timeRange：时间范围（type=range/preset，start/end）。\par
+sort：排序规则。\par
+limit：返回行数。\par
+capabilities：后端注入（canDetail/canExport/canAdmin）。\par
+scope：后端注入（effectiveRegionIds/effectiveCounterIds）。\par
+\par
+8.3 后端强制校验\par
+（1）scope 交集校验：所有 regionIds/counterIds 必须与 effectiveScope 取交集，否则拒绝或降级并提示。\par
+（2）detail 权限校验：无 AI_QUERY:DETAIL 时，detail 直接降级为聚合（或拒绝）。\par
+（3）export 权限校验：无 AI_QUERY:EXPORT 时，禁止导出。\par
+（4）limit/timeRange 强制裁剪。\par
+\par
+\b 9. 意图库（MVP）与模板映射\b0\par
+9.1 管理端（admin）核心意图（示例）\par
+（1）waiting_total：当前等待总人数（KPI）。\par
+（2）waiting_by_business：当前等待按业务分布（rank）。\par
+（3）take_count：取号量（kpi/rank/trend）。\par
+（4）completed_count：办结量（kpi/rank/trend）。\par
+（5）skipped_count：过号量（kpi/rank）。\par
+（6）avg_wait：平均等待时长（kpi/rank/trend 可选）。\par
+（7）avg_serve：平均办理时长（kpi/rank/trend 可选）。\par
+（8）counter_top_completed：窗口办结 TopN（rank）。\par
+（9）biz_top_completed：业务办结 TopN（rank）。\par
+（10）active_service_total：叫号未办结数量（KPI）。\par
+\par
+9.2 窗口工作台（counter）默认意图（示例）\par
+（1）今日取号、今日办结、今日过号、当前等待、叫号未办结。\par
+（2）本窗口按业务分布、今日按小时趋势、近7天趋势。\par
+（3）单票查询（ticketNo 精确匹配）。\par
+\par
+9.3 明细意图白名单（需 AI_QUERY:DETAIL，limit<=200）\par
+（D1）过号明细：指定时间范围 +（区域或窗口）+ 可选 skipType。\par
+（D2）办结明细：指定时间范围。\par
+（D3）当前等待队列明细：必须指定区域或窗口（counter workspace 强制窗口）。\par
+（D4）叫号未办结明细：必须指定区域或窗口。\par
+（D5）重新激活明细：指定时间范围。\par
+（D6）单票查询：ticketNo。\par
+\par
+\b 10. 越权与降级策略（窗口侧默认）\b0\par
+10.1 目标\par
+当窗口侧问题超出本窗口范围时，默认降级到本窗口并给出提示，保障体验且不越权。\par
+\par
+10.2 推荐提示文案（默认模式）\par
+“当前入口仅支持本窗口数据分析，已按【本窗口 + 时间范围】为你查询；如需区域汇总请前往管理端或联系管理员授权。”\par
+\par
+\b 11. 后端接口（建议）\b0\par
+11.1 统一问答接口\par
+POST /api/v1/ai/ask\par
+入参：workspace，sessionId（可选），question，uiContext（可选）。\par
+出参：answer（文本），cards（可选），table（可选），chart（可选），dsl（回显可选），tips（提示）。\par
+\par
+11.2 会话接口\par
+GET /api/v1/ai/sessions?workspace=...\par
+GET /api/v1/ai/sessions/{id}/messages\par
+\par
+11.3 导出接口（可选分离）\par
+POST /api/v1/ai/export\par
+校验 AI_QUERY:EXPORT 与 scope/limit。\par
+\par
+\b 12. 存储与审计（建议）\b0\par
+12.1 会话存储\par
+MVP：Redis 存 session（TTL），可后续升级为 MySQL 落库。\par
+\par
+12.2 审计记录（建议落 MySQL）\par
+字段：userId，role，workspace，question，intent，dsl，effectiveScope，rowsCount，latencyMs，success，errorMsg，createdAt。\par
+\par
+\b 13. 安全与性能护栏\b0\par
+13.1 安全护栏\par
+（1）字段白名单：明细默认不返回敏感个人信息字段。\par
+（2）SQL 白名单：仅允许模板 SQL，禁止模型直出 SQL。\par
+（3）严格授权：DETAIL/EXPORT 均需按钮权限。\par
+\par
+13.2 性能护栏\par
+（1）限流：按用户/接口 QPS；明细与导出更严格。\par
+（2）超时：慢查询超时返回“请缩小范围/改用聚合”。\par
+（3）缓存：对聚合结果可短 TTL 缓存（按 workspace+user+dsl hash）。\par
+\par
+\b 14. 技术选型建议（MVP）\b0\par
+（1）前端：Vue 3 + Element Plus + ECharts（复用现有栈）；Counter 侧用 Drawer。\par
+（2）后端：Spring Boot + MyBatis Plus（模板查询）；Redis 用于 session/限流/缓存。\par
+（3）大模型：先接入云端 OpenAI 兼容接口（后端统一封装），后续可替换为企业自建推理。\par
+（4）检索：MVP 用词典映射；后续可加轻量 RAG（可选）。\par
+\par
+\b 15. 实施路径（建议）\b0\par
+（1）搭建双入口 UI（admin 页面 + counter 抽屉）与 workspace 贯通。\par
+（2）上线聚合类意图（10~15 个）闭环：kpi/rank/trend。\par
+（3）接入按钮权限与 scope 注入、越权降级提示。\par
+（4）按需上线 DETAIL（明细）与 EXPORT（导出），同时补齐审计与限流。\par
+\par
+—— 结束 ——\par
+}

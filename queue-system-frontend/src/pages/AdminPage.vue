@@ -154,6 +154,7 @@
           <UserPanel v-if="activeKey === 'users'" :initial-tab="userSubTab" />
           <MenuPanel v-if="activeKey === 'menu'" @reload="loadMenus" />
           <StatisticsPanel v-if="activeKey === 'statistics'" />
+          <AiQueryPanel v-if="activeKey === 'ai'" />
         </div>
 
         <el-dialog v-model="regionPickerVisible" width="520px" draggable :show-close="false">
@@ -235,6 +236,7 @@ import QrCodePanel from '../components/admin/QrCodePanel.vue'
 import UserPanel from '../components/admin/UserPanel.vue'
 import MenuPanel from '../components/admin/MenuPanel.vue'
 import StatisticsPanel from '../components/admin/StatisticsPanel.vue'
+import AiQueryPanel from '../components/admin/AiQueryPanel.vue'
 import ContextMenu from '../components/ContextMenu.vue'
 
 const router = useRouter()
@@ -392,6 +394,7 @@ function menuKeyFromPath(path) {
     '/admin?tab=menu': 'menu',
     '/admin?tab=roles': 'users',
     '/admin?tab=statistics': 'statistics',
+    '/admin?tab=ai': 'ai',
     '/counter': 'counter',
     '/display': 'display'
   }

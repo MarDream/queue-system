@@ -156,6 +156,7 @@ public class ScreenController {
                 vo.setTicketNo(t.getTicketNo());
                 BusinessType bt = btMap.get(t.getBusinessTypeId());
                 vo.setBusinessTypeName(bt != null ? bt.getName() : "");
+                vo.setReactivated(t.getReactivatedAt() != null);
                 return vo;
             })
             .collect(Collectors.toList());

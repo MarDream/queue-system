@@ -621,7 +621,7 @@ function closeCodeToast() {
 
 async function handleDelete(row) {
   try {
-    await ElMessageBox.confirm(`确定删除「${row.name}」？`, '确认')
+    await ElMessageBox.confirm(`确定删除「${row.name}」？删除该区域后，相应区域在用的二维码也将同步删除`, '确认', { type: 'warning' })
     await request.delete(`/regions/${row.id}`)
     ElMessage.success('删除成功')
     await fetchData()

@@ -194,6 +194,9 @@
           <el-button v-if="printSelected.length > 0" type="primary" size="small" @click="openPrintDialog">
             打印选中 ({{ printSelected.length }})
           </el-button>
+          <el-button v-if="printSelected.length > 0" type="danger" size="small" @click="batchRemoveQr">
+            批量删除 ({{ printSelected.length }})
+          </el-button>
         </div>
       </div>
       <el-checkbox-group v-model="printSelected" class="qr-grid">
@@ -263,7 +266,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, nextTick, computed, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download, CopyDocument, Delete, Picture, Grid, Notebook } from '@element-plus/icons-vue'
 import request from '../../api/index'
 import { useUserStore } from '../../stores/user'
@@ -534,6 +537,20 @@ async function removeQr(id) {
     ElMessage.success('已删除')
   } catch {
     ElMessage.error('删除失败')
+  }
+}
+
+async function batchRemoveQr() {
+  const ids = [...printSelected.value]
+  if (!ids.length) return
+  try {
+    await ElMessageBox.confirm(`确定删除选中的 ${ids.length} 个二维码？`, '批量删除', { type: 'warning' })
+    await request.delete('/qrcode/batch', { data: { ids } })
+    qrList.value = qrList.value.filter(item => !ids.includes(item.id))
+    printSelected.value = []
+    ElMessage.success(`已删除 ${ids.length} 个二维码`)
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('批量删除失败')
   }
 }
 

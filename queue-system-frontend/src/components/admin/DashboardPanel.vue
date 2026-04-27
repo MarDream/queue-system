@@ -23,31 +23,53 @@
       </div>
     </div>
 
-    <div class="section-title">各窗口办理量</div>
-    <el-table v-if="data.counterStats?.length" :data="data.counterStats || []" stripe style="max-width:400px">
-      <el-table-column prop="counterName" label="窗口" />
-      <el-table-column prop="completedCount" label="已办结" />
-    </el-table>
+    <div class="section-title-row">
+      <div class="section-title">各窗口办理量</div>
+      <el-button
+        v-if="sortedCounterStats.length > counterTopLimit"
+        link
+        type="primary"
+        @click="openCounterDialog"
+      >
+        查看全部（{{ sortedCounterStats.length }}）
+      </el-button>
+    </div>
+    <div class="counter-chart" v-if="topCounterStats.length">
+      <div v-for="(item, idx) in topCounterStats" :key="item.counterId || item.counterName" class="counter-bar-row">
+        <span class="counter-rank" :class="'rank-' + (idx + 1)">{{ idx + 1 }}</span>
+        <span class="counter-name" :title="item.counterName">{{ item.counterName }}</span>
+        <div class="counter-bar-track">
+          <div class="counter-bar-fill" :style="{ width: barWidth(item.completedCount, maxCounterCount) + '%' }"></div>
+        </div>
+        <span class="counter-count">{{ item.completedCount ?? 0 }}</span>
+      </div>
+    </div>
     <div v-else class="empty-tip">暂无数据！</div>
 
     <div class="section-title" style="margin-top:32px">各业务占比</div>
     <div class="biz-chart" v-if="sortedBizStats.length">
       <div
-        v-for="item in sortedBizStats"
+        v-for="(item, idx) in sortedBizStats"
         :key="item.businessTypeId"
         class="biz-bar-row"
         @click="openBizDetail(item)"
       >
         <div class="biz-bar-label">
+          <span class="biz-bar-dot" :style="{ background: bizColor(idx).fg }"></span>
           <span class="biz-bar-name">{{ item.businessType }}</span>
           <span class="biz-bar-count">{{ item.count }} 票</span>
         </div>
         <div class="biz-bar-track">
           <div
             class="biz-bar-fill"
-            :style="{ width: (item.percentage || 0) + '%' }"
+            :style="{
+              width: Math.max(item.percentage || 0, 1.5) + '%',
+              background: bizColor(idx).gradient
+            }"
           ></div>
-          <span class="biz-bar-pct">{{ item.percentage != null ? item.percentage.toFixed(1) + '%' : '—' }}</span>
+          <span class="biz-bar-pct" :class="{ 'pct-inside': (item.percentage || 0) > 28 }">
+            {{ item.percentage != null ? item.percentage.toFixed(1) + '%' : '—' }}
+          </span>
         </div>
       </div>
     </div>
@@ -84,6 +106,68 @@
         <el-table-column prop="operatorName" label="操作人员" />
         <el-table-column prop="ticketCount" label="取号数" width="80" align="center" />
       </el-table>
+    </el-dialog>
+
+    <el-dialog
+      v-model="counterDialogVisible"
+      width="760px"
+      class="counter-detail-dialog"
+      :show-close="false"
+      draggable
+      resizable
+      align-center
+    >
+      <template #header>
+        <div class="counter-dlg-header">
+          <div class="counter-dlg-left">
+            <span class="counter-dlg-title">各窗口办理量</span>
+            <span class="counter-dlg-count">共 <strong>{{ filteredCounterStats.length }}</strong> 条</span>
+          </div>
+          <div class="counter-dlg-right">
+            <el-input
+              v-model="counterKeyword"
+              placeholder="搜索窗口"
+              clearable
+              style="width:220px"
+            />
+            <el-button circle size="small" class="icon-close-btn" @click="counterDialogVisible = false" title="关闭">
+              <svg class="close-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M15 9l-6 6M9 9l6 6"/>
+              </svg>
+            </el-button>
+          </div>
+        </div>
+      </template>
+
+      <el-table :data="pagedCounterStats" stripe class="counter-detail-table" empty-text="暂无数据！" table-layout="auto">
+        <el-table-column type="index" label="#" width="50" align="center" />
+        <el-table-column prop="counterName" label="窗口" min-width="200" show-overflow-tooltip />
+        <el-table-column label="已办结" width="180" align="center">
+          <template #default="{ row }">
+            <div class="counter-spark-cell">
+              <div class="counter-spark-track">
+                <div
+                  class="counter-spark-fill"
+                  :style="{ width: barWidth(row.completedCount, dialogMaxCount) + '%' }"
+                ></div>
+              </div>
+              <span class="counter-spark-num">{{ row.completedCount ?? 0 }}</span>
+            </div>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <div class="counter-dlg-pagination">
+        <el-pagination
+          v-model:current-page="counterPage"
+          v-model:page-size="counterPageSize"
+          :total="filteredCounterStats.length"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next, jumper"
+          small
+        />
+      </div>
     </el-dialog>
 
 <el-dialog
@@ -209,7 +293,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { Search, Refresh } from '@element-plus/icons-vue'
 import { getDashboard, getTicketList, getBusinessTypeDetail } from '../../api/screen'
 import { useUserStore } from '../../stores/user'
@@ -235,9 +319,36 @@ const bizDialogTitle = ref('')
 const bizDetailList = ref([])
 const bizLoading = ref(false)
 
+const counterTopLimit = 10
+const counterDialogVisible = ref(false)
+const counterKeyword = ref('')
+const counterPage = ref(1)
+const counterPageSize = ref(10)
+
 const filterActive = computed(() => {
   return filter.value.phone || filter.value.name || filter.value.ticketNo ||
     (filter.value.dateRange && filter.value.dateRange.length === 2)
+})
+
+const sortedCounterStats = computed(() => {
+  if (!data.value.counterStats) return []
+  return [...data.value.counterStats]
+    .filter(s => (s.completedCount ?? 0) > 0 || s.counterName)
+    .sort((a, b) => (b.completedCount ?? 0) - (a.completedCount ?? 0))
+})
+
+const topCounterStats = computed(() => sortedCounterStats.value.slice(0, counterTopLimit))
+
+const filteredCounterStats = computed(() => {
+  const kw = String(counterKeyword.value || '').trim().toLowerCase()
+  if (!kw) return sortedCounterStats.value
+  return sortedCounterStats.value.filter(r => String(r.counterName || '').toLowerCase().includes(kw))
+})
+
+const pagedCounterStats = computed(() => {
+  const start = (counterPage.value - 1) * counterPageSize.value
+  const end = start + counterPageSize.value
+  return filteredCounterStats.value.slice(start, end)
 })
 
 const sortedBizStats = computed(() => {
@@ -247,9 +358,58 @@ const sortedBizStats = computed(() => {
     .sort((a, b) => (b.percentage || 0) - (a.percentage || 0))
 })
 
+const maxCounterCount = computed(() => {
+  if (!topCounterStats.value.length) return 1
+  return Math.max(...topCounterStats.value.map(s => s.completedCount ?? 0), 1)
+})
+
+const dialogMaxCount = computed(() => {
+  if (!sortedCounterStats.value.length) return 1
+  return Math.max(...sortedCounterStats.value.map(s => s.completedCount ?? 0), 1)
+})
+
+function barWidth(count, max) {
+  const v = count ?? 0
+  const m = max ?? 1
+  if (v <= 0) return 0
+  return Math.max(3, Math.round((v / m) * 100))
+}
+
+const BIZ_COLORS = [
+  { fg: '#2563eb', gradient: 'linear-gradient(90deg, #bfdbfe, #3b82f6)' },   // Blue
+  { fg: '#059669', gradient: 'linear-gradient(90deg, #a7f3d0, #10b981)' },   // Emerald
+  { fg: '#7c3aed', gradient: 'linear-gradient(90deg, #ddd6fe, #8b5cf6)' },   // Violet
+  { fg: '#d97706', gradient: 'linear-gradient(90deg, #fef3c7, #f59e0b)' },   // Amber
+  { fg: '#db2777', gradient: 'linear-gradient(90deg, #fce7f3, #ec4899)' },   // Pink
+  { fg: '#0891b2', gradient: 'linear-gradient(90deg, #cffafe, #06b6d4)' },   // Cyan
+  { fg: '#ea580c', gradient: 'linear-gradient(90deg, #fed7aa, #f97316)' },   // Orange
+  { fg: '#4f46e5', gradient: 'linear-gradient(90deg, #e0e7ff, #6366f1)' },   // Indigo
+]
+
+function bizColor(idx) {
+  return BIZ_COLORS[idx % BIZ_COLORS.length]
+}
+
 onMounted(async () => {
   try { data.value = await getDashboard({ userId: Number(userStore.userId) || undefined }) }
   catch {}
+})
+
+function openCounterDialog() {
+  counterKeyword.value = ''
+  counterPage.value = 1
+  counterPageSize.value = 10
+  counterDialogVisible.value = true
+}
+
+watch(counterKeyword, () => {
+  counterPage.value = 1
+})
+
+watch([filteredCounterStats, counterPageSize], () => {
+  const total = filteredCounterStats.value.length
+  const maxPage = Math.max(1, Math.ceil(total / counterPageSize.value))
+  if (counterPage.value > maxPage) counterPage.value = maxPage
 })
 
 async function openBizDetail(item) {
@@ -369,17 +529,90 @@ function formatTime(time) {
   font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
   color: var(--text-muted); margin-bottom: 12px;
 }
+.section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.section-title-row .section-title { margin-bottom: 0; }
+
+/* ── 各窗口办理量 — 横向柱状图 ──────────────────────────── */
+.counter-chart { max-width: 640px; }
+.counter-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+.counter-bar-row:hover {
+  background: var(--bg-raised);
+  border-color: var(--border-hi);
+}
+.counter-rank {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--mono);
+  color: var(--text-muted);
+  background: rgba(0,0,0,0.05);
+  flex-shrink: 0;
+}
+.counter-rank.rank-1 { background: #fef3c7; color: #b45309; }
+.counter-rank.rank-2 { background: #e5e7eb; color: #4b5563; }
+.counter-rank.rank-3 { background: #fed7aa; color: #9a3412; }
+.counter-name {
+  width: 140px;
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.counter-bar-track {
+  flex: 1;
+  height: 22px;
+  background: rgba(0,0,0,0.05);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.counter-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary-hover), var(--primary));
+  border-radius: 3px;
+  transition: width 0.6s ease;
+  min-width: 3px;
+}
+.counter-count {
+  width: 42px;
+  text-align: right;
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--mono);
+  color: var(--text-primary);
+}
 
 /* ── 业务占比横向柱状图 ─────────────────────────────── */
 .biz-chart { max-width: 600px; }
 .biz-bar-row {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
   margin-bottom: 14px;
   cursor: pointer;
-  padding: 8px 10px;
-  border-radius: 4px;
+  padding: 9px 12px;
+  border-radius: 6px;
   border: 1px solid transparent;
   transition: all 0.2s;
 }
@@ -392,32 +625,44 @@ function formatTime(time) {
   justify-content: space-between;
   align-items: center;
 }
+.biz-bar-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-right: 2px;
+}
 .biz-bar-name { font-size: 13.5px; color: var(--text-primary); font-weight: 500; }
 .biz-bar-count { font-size: 12px; color: var(--text-secondary); font-family: var(--mono); }
 .biz-bar-track {
   position: relative;
-  height: 20px;
-  background: var(--bg-raised);
-  border-radius: 3px;
+  height: 24px;
+  background: rgba(0,0,0,0.04);
+  border-radius: 4px;
   overflow: hidden;
   display: flex;
   align-items: center;
 }
 .biz-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--primary-hover), var(--primary));
-  border-radius: 3px;
+  border-radius: 4px;
   transition: width 0.6s ease;
   min-width: 2px;
 }
 .biz-bar-pct {
   position: absolute;
-  right: 8px;
-  font-size: 11px;
-  color: var(--text-secondary);
+  right: 10px;
+  font-size: 11.5px;
+  color: var(--text-primary);
   font-family: var(--mono);
-  font-weight: 600;
-  line-height: 20px;
+  font-weight: 700;
+  line-height: 24px;
+  z-index: 1;
+}
+.biz-bar-pct.pct-inside {
+  right: 10px;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.25);
 }
 .empty-tip { color: var(--text-muted); font-size: 13px; padding: 8px 0; }
 
@@ -443,6 +688,67 @@ function formatTime(time) {
 .biz-dlg-count { font-size: 12px; color: var(--text-muted); }
 .biz-dlg-count strong { color: var(--primary); font-size: 14px; }
 .biz-detail-table { margin-top: 0; }
+
+.counter-detail-dialog .el-dialog {
+  background: #f7f8fa !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+}
+.counter-dlg-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--border);
+}
+.counter-dlg-left {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+.counter-dlg-title { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+.counter-dlg-count { font-size: 12px; color: var(--text-muted); }
+.counter-dlg-count strong { color: var(--primary); font-size: 14px; }
+.counter-dlg-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.counter-dlg-pagination {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 16px 0;
+}
+
+/* ── 窗口弹窗内联进度条 ──────────────────────────────── */
+.counter-spark-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.counter-spark-track {
+  flex: 1;
+  height: 14px;
+  background: rgba(0,0,0,0.05);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.counter-spark-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary-hover), var(--primary));
+  border-radius: 3px;
+  transition: width 0.4s ease;
+  min-width: 2px;
+}
+.counter-spark-num {
+  width: 36px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--mono);
+  color: var(--text-primary);
+}
 </style>
 
 <style>

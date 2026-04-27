@@ -9,6 +9,7 @@ DROP TABLE IF EXISTS `sys_role_menu`;
 DROP TABLE IF EXISTS `sys_user_button`;
 DROP TABLE IF EXISTS `sys_user_menu`;
 DROP TABLE IF EXISTS `sys_user_menu_sort`;
+DROP TABLE IF EXISTS `sys_user_region_scope`;
 DROP TABLE IF EXISTS `counter_business`;
 DROP TABLE IF EXISTS `counter_operator`;
 DROP TABLE IF EXISTS `ticket`;
@@ -150,6 +151,7 @@ CREATE TABLE IF NOT EXISTS `ticket` (
     `served_at` DATETIME COMMENT '开始服务时间',
     `completed_at` DATETIME COMMENT '服务完成时间',
     `skip_type` VARCHAR(20) COMMENT '过号来源类型：manual=人工跳过，system=系统过号',
+    `reactivated_at` DATETIME COMMENT '重新激活时间，用于排序优先叫号',
     `version` INT DEFAULT 0 COMMENT '乐观锁版本号',
     `deleted` TINYINT(1) DEFAULT 0 COMMENT '软删除标记：1=已删除，0=正常',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -285,6 +287,16 @@ CREATE TABLE `sys_user_button` (
     INDEX `idx_user` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户按钮权限表';
 
+-- 用户区域数据范围表
+CREATE TABLE `sys_user_region_scope` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `user_id` BIGINT NOT NULL COMMENT '用户ID',
+    `region_id` BIGINT NOT NULL COMMENT '区域ID',
+    UNIQUE KEY `uk_user_region` (`user_id`, `region_id`),
+    INDEX `idx_user` (`user_id`),
+    INDEX `idx_region` (`region_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户区域数据范围';
+
 -- 用户菜单排序表
 CREATE TABLE `sys_user_menu_sort` (
     `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -351,6 +363,10 @@ FROM sys_menu WHERE path = '/admin' LIMIT 1;
 
 INSERT INTO sys_menu (name, path, icon, sort_order, parent_id, type)
 SELECT '统计分析', '/admin?tab=statistics', 'DataAnalysis', 12, @admin_menu_id, 'menu'
+FROM sys_menu WHERE path = '/admin' LIMIT 1;
+
+INSERT INTO sys_menu (name, path, icon, sort_order, parent_id, type)
+SELECT '智能问数', '/admin?tab=ai', 'ChatDotRound', 13, @admin_menu_id, 'menu'
 FROM sys_menu WHERE path = '/admin' LIMIT 1;
 
 -- =============================================
@@ -428,7 +444,7 @@ WHERE r.code = 'SUPER_ADMIN';
 INSERT INTO sys_role_menu (role_id, role_code, menu_id)
 SELECT r.id, r.code, m.id
 FROM sys_role r, sys_menu m
-WHERE r.code = 'REGION_ADMIN';
+WHERE r.code = 'REGION_ADMIN' AND m.path <> '/admin?tab=ai';
 
 -- 区域管理员按钮权限（不含用户管理下的敏感按钮，暂全部授权）
 INSERT INTO sys_role_button (role_id, role_code, button_id)

@@ -14,7 +14,10 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/api/v1/admin/statistics")
@@ -72,6 +75,16 @@ public class StatisticsController {
      * 获取用户可见的区域ID列表（包含自身及子区域）
      */
     private List<Long> getAllowedRegionIds(SysUser user) {
+        List<Long> scopedRoots = sysUserMapper.selectRegionScopeIds(user.getId());
+        if (scopedRoots != null && !scopedRoots.isEmpty()) {
+            Set<Long> all = new HashSet<>();
+            for (Long rid : scopedRoots) {
+                if (rid == null) continue;
+                all.addAll(regionService.getDescendantRegionIds(rid));
+            }
+            return new ArrayList<>(all);
+        }
+
         if (user.getRegionCode() == null || user.getRegionCode().isEmpty()) {
             return List.of();
         }

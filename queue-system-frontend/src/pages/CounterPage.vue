@@ -1,5 +1,9 @@
 <template>
   <div class="page-shell">
+    <el-drawer v-model="aiDrawerVisible" direction="rtl" size="620px" :with-header="false">
+      <AiQueryPanel :workspace="'counter'" :counter-id="counterId" :hide-header="true" />
+    </el-drawer>
+
     <header class="page-header">
       <span class="logo"><img src="/favicon.png" class="brand-icon" alt="QMS" /></span>
       <div class="sep"></div>
@@ -38,6 +42,10 @@
             <span class="user-name">{{ userStore.name || userStore.username || '—' }}</span>
           </span>
         </div>
+        <button v-if="canUseAi" class="logout-btn" @click="aiDrawerVisible = true" title="智能问数">
+          <el-icon><ChatLineRound /></el-icon>
+          <span>问数</span>
+        </button>
         <button class="logout-btn" @click="handleLogout" title="退出登录">
           <el-icon><SwitchFilled /></el-icon>
           <span>退出</span>
@@ -102,7 +110,12 @@
           >
             <span class="qi-seq">{{ idx + 1 }}</span>
             <div class="qi-info">
-              <div class="qi-number">{{ getDisplayTicketNo(item.ticketNo) }}</div>
+              <div class="qi-number">
+                <el-tooltip v-if="item.reactivated" content="已激活" placement="top" :show-after="300">
+                  <el-icon class="reactivated-icon"><RefreshRight /></el-icon>
+                </el-tooltip>
+                {{ getDisplayTicketNo(item.ticketNo) }}
+              </div>
               <div class="qi-biz">{{ item.businessType }}</div>
             </div>
             <div class="qi-meta">
@@ -185,8 +198,8 @@
         <div class="panel-header" style="margin-top:24px">
           <span class="panel-title">办结记录</span>
         </div>
-        <div class="history-list">
-          <div v-for="h in history" :key="h.id" class="history-row">
+        <div ref="historyListRef" class="history-list" @wheel="onHistoryWheel">
+          <div v-for="h in pagedHistory" :key="h.id" class="history-row">
             <span class="mono text-muted" style="font-size:11px">{{ h.time }}</span>
             <span class="mono text-accent" style="font-size:13px">{{ getDisplayTicketNo(h.number) }}</span>
             <span style="font-size:12px;color:var(--text-secondary)">{{ h.biz }}</span>
@@ -199,7 +212,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import { useCommonStore } from '../stores/common'
@@ -207,13 +220,17 @@ import { callNext, recall, skip, serve, complete, togglePause } from '../api/cou
 import { getScreenData, getTicketList } from '../api/screen'
 import { counterApi } from '../api/admin'
 import { ElMessage } from 'element-plus'
-import { SwitchFilled, Location, UserFilled, Avatar } from '@element-plus/icons-vue'
+import { SwitchFilled, Location, UserFilled, Avatar, RefreshRight, ChatLineRound } from '@element-plus/icons-vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { getDisplayTicketNo } from '../utils/ticketUtils'
+import AiQueryPanel from '../components/admin/AiQueryPanel.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
 const store = useCommonStore()
+
+const aiDrawerVisible = ref(false)
+const canUseAi = computed(() => userStore.isSuperAdmin || userStore.role === 'WINDOW_OPERATOR')
 
 const counterList = ref([])
 const counterId = ref(null)
@@ -236,6 +253,18 @@ const counterStatus = computed(() => {
 })
 const serveSeconds = ref(0)
 const history = ref([])
+const historyListRef = ref(null)
+const historyPage = ref(1)
+const historyPageSize = 10
+const historyTotalPages = computed(() => Math.max(1, Math.ceil(history.value.length / historyPageSize)))
+const pagedHistory = computed(() => {
+  const start = (historyPage.value - 1) * historyPageSize
+  const end = start + historyPageSize
+  return history.value.slice(start, end)
+})
+let historyWheelAccumulatedDelta = 0
+let historyWheelResetTimer = null
+let historyLastFlipAt = 0
 const todayStats = ref([
   { label: '已办结', value: '0' },
   { label: '等待人数', value: '0' },
@@ -279,6 +308,7 @@ function loadCounterState() {
       todayStats.value[2].value = String(s.recallStats ?? 0)
       todayStats.value[3].value = String(s.skipStats ?? 0)
       history.value = Array.isArray(s.history) ? s.history : []
+      historyPage.value = 1
     }
   } catch {}
 }
@@ -310,6 +340,11 @@ onMounted(async () => {
 onUnmounted(() => {
   if (timeTimer) clearInterval(timeTimer)
   if (pollTimer) clearInterval(pollTimer)
+  if (historyWheelResetTimer) clearTimeout(historyWheelResetTimer)
+})
+
+watch(historyTotalPages, (p) => {
+  if (historyPage.value > p) historyPage.value = p
 })
 
 async function loadCounters() {
@@ -532,6 +567,7 @@ async function handleComplete() {
   const dur = Math.round(serveSeconds.value / 60) || 1
   const now = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
   history.value.unshift({ id: Date.now(), time: now, number: savedNum, biz: savedBiz, duration: dur })
+  historyPage.value = 1
 
   completing.value = true
   const completedCount = parseInt(todayStats.value[0].value) + 1
@@ -548,6 +584,55 @@ async function handleComplete() {
     ElMessage.error(err.message)
   } finally {
     completing.value = false
+  }
+}
+
+function scrollHistoryToTop() {
+  const el = historyListRef.value
+  if (el && typeof el.scrollTo === 'function') {
+    el.scrollTo({ top: 0, behavior: 'smooth' })
+  } else if (el) {
+    el.scrollTop = 0
+  }
+}
+
+function flipHistoryPage(direction) {
+  const maxPage = historyTotalPages.value
+  const next = Math.min(maxPage, Math.max(1, historyPage.value + direction))
+  if (next === historyPage.value) return
+  historyPage.value = next
+  scrollHistoryToTop()
+}
+
+function onHistoryWheel(e) {
+  const total = history.value.length
+  if (!total) return
+  if (historyTotalPages.value <= 1) return
+  const el = historyListRef.value
+  if (!el) return
+
+  const now = Date.now()
+  if (now - historyLastFlipAt < 250) return
+
+  const scrollTop = el.scrollTop || 0
+  const clientHeight = el.clientHeight || 0
+  const scrollHeight = el.scrollHeight || 0
+  const isAtTop = scrollTop <= 2
+  const isAtBottom = scrollTop + clientHeight >= scrollHeight - 2
+
+  historyWheelAccumulatedDelta += e.deltaY
+  if (historyWheelResetTimer) clearTimeout(historyWheelResetTimer)
+  historyWheelResetTimer = setTimeout(() => { historyWheelAccumulatedDelta = 0 }, 160)
+
+  const threshold = 120
+  if (Math.abs(historyWheelAccumulatedDelta) < threshold) return
+  const dir = historyWheelAccumulatedDelta > 0 ? 1 : -1
+  historyWheelAccumulatedDelta = 0
+
+  if ((dir < 0 && isAtTop) || (dir > 0 && isAtBottom)) {
+    e.preventDefault()
+    historyLastFlipAt = now
+    flipHistoryPage(dir)
   }
 }
 
@@ -660,7 +745,8 @@ async function handleLogout() {
 .queue-next .qi-seq,
 .queue-next .qi-number { color: var(--primary); }
 .qi-info { flex: 1; }
-.qi-number { font-size: var(--text-sm); color: var(--text-primary); font-weight: 600; }
+.qi-number { font-size: var(--text-sm); color: var(--text-primary); font-weight: 600; display: flex; align-items: center; gap: 4px; }
+.reactivated-icon { font-size: 14px; color: var(--el-color-warning); flex-shrink: 0; }
 .qi-biz,
 .qi-wait { font-size: 11px; color: var(--text-muted); }
 .qi-meta { display: flex; flex-direction: column; align-items: flex-end; gap: var(--sp-1); }
@@ -811,7 +897,7 @@ async function handleLogout() {
 .sb-value { font-size: var(--text-xl); color: var(--primary); }
 .sb-label { font-size: 10px; color: var(--text-muted); }
 
-.history-list { padding: var(--sp-2) var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-2); overflow-y: auto; }
+.history-list { padding: var(--sp-2) var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-2); overflow-y: auto; max-height: 320px; }
 .history-row {
   display: grid;
   grid-template-columns: 44px 52px 1fr 32px;

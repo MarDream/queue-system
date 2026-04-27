@@ -112,3 +112,10 @@ export function togglePause(counterId) { return counterRequest.post('/counter/to
  * @returns {Promise<void>}
  */
 export function reactivate(ticketNo) { return counterRequest.post('/counter/reactivate', { ticketNo }) }
+
+/**
+ * Get completed history for a counter from Redis.
+ * @param {string|number} counterId
+ * @returns {Promise<Array<{id: number, time: string, number: string, biz: string, duration: number}>>}
+ */
+export function getCounterHistory(counterId) { return counterRequest.get(`/counter/${counterId}/history`) }

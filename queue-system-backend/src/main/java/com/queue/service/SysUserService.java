@@ -42,4 +42,7 @@ public interface SysUserService {
     List<SysButton> getAvailableButtonsForOperator(Long operatorId);
     List<SysMenu> getAvailableMenusForTargetUser(Long operatorId, Long targetUserId);
     List<SysButton> getAvailableButtonsForTargetUser(Long operatorId, Long targetUserId);
+
+    List<Long> getUserRegionScopes(Long operatorId, Long targetUserId);
+    void setUserRegionScopes(Long operatorId, Long targetUserId, List<Long> regionIds);
 }

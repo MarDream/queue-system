@@ -23,10 +23,13 @@ public class Ticket {
     private LocalDateTime servedAt;
     private LocalDateTime completedAt;
     private String skipType; // 过号来源类型：manual=人工跳过，system=系统过号
+    private LocalDateTime reactivatedAt; // 重新激活时间，用于排序优先叫号
     @Version
     private Integer version;
     @TableLogic
     private Integer deleted;
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
+    @TableField(fill = FieldFill.INSERT_UPDATE)
+    private LocalDateTime updatedAt;
 }

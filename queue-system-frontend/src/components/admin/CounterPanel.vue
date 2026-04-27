@@ -67,83 +67,84 @@
     </div>
 
     <div class="table-wrap">
-      <el-table
-        ref="tableRef"
-        :data="filteredCounters"
-        v-loading="loading"
-        row-key="id"
-        highlight-current-row
-        empty-text="暂无数据"
-        :row-class-name="rowClassName"
-        @selection-change="onSelectionChange"
-        @row-click="onRowClick"
-        style="width:100%"
-      >
-        <el-table-column type="selection" width="52" />
-        <el-table-column label="窗口" min-width="180">
-          <template #default="{ row }">
-            <div class="cell-title">
-              <span class="cell-name">{{ row.name }}</span>
-              <el-tag size="small" class="cell-tag">#{{ row.number }}</el-tag>
-            </div>
-            <div class="cell-sub">
-              <span class="cell-muted">{{ regionNameMap[row.regionId] || '—' }}</span>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="110" align="center">
-          <template #default="{ row }">
-            <StatusBadge :status="row.status" type="counter" />
-          </template>
-        </el-table-column>
-        <el-table-column label="业务" min-width="200" show-overflow-tooltip>
-          <template #default="{ row }">
-            <div class="tag-list">
-              <el-tag v-for="t in displayBusinessTags(row.businessTypes)" :key="t" size="small" type="info">
-                {{ t }}
-              </el-tag>
-              <el-tag v-if="extraBusinessCount(row.businessTypes) > 0" size="small" type="info">
-                +{{ extraBusinessCount(row.businessTypes) }}
-              </el-tag>
-              <span v-if="!row.businessTypes || row.businessTypes.length === 0" class="cell-muted">—</span>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作员" min-width="180" show-overflow-tooltip>
-          <template #default="{ row }">
-            <span v-if="row.operatorNames && row.operatorNames.length">{{ row.operatorNames.join(', ') }}</span>
-            <span v-else class="cell-muted">—</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right" align="center">
-          <template #default="{ row }">
-            <el-button size="small" link type="primary" @click.stop="openEdit(row)">
-              <el-icon><Edit /></el-icon> 编辑
-            </el-button>
-            <el-button
-              v-if="row.status !== 'paused'"
-              size="small"
-              link
-              type="warning"
-              @click.stop="updateCounterStatus(row, 'paused')"
-            >
-              暂停
-            </el-button>
-            <el-button
-              v-else
-              size="small"
-              link
-              type="success"
-              @click.stop="updateCounterStatus(row, 'idle')"
-            >
-              恢复
-            </el-button>
-            <el-button size="small" link type="danger" @click.stop="handleDelete(row)">
-              <el-icon><Delete /></el-icon> 删除
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <div ref="tableContainerRef" class="table-container" @wheel="onWheelPage">
+        <el-table
+          ref="tableRef"
+          :data="pagedCounters"
+          v-loading="loading"
+          row-key="id"
+          highlight-current-row
+          table-layout="auto"
+          :height="tableHeight"
+          empty-text="暂无数据"
+          :row-class-name="rowClassName"
+          @selection-change="onSelectionChange"
+          @row-click="onRowClick"
+          style="width:100%"
+        >
+          <el-table-column type="selection" width="52" :reserve-selection="true" />
+          <el-table-column label="窗口" min-width="180">
+            <template #default="{ row }">
+              <div class="cell-title">
+                <span class="cell-name">{{ row.name }}</span>
+                <el-tag size="small" class="cell-tag">#{{ row.number }}</el-tag>
+              </div>
+              <div class="cell-sub">
+                <span class="cell-muted">{{ regionNameMap[row.regionId] || '—' }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="90" align="center">
+            <template #default="{ row }">
+              <StatusBadge :status="row.status" type="counter" />
+            </template>
+          </el-table-column>
+          <el-table-column label="业务" min-width="320">
+            <template #default="{ row }">
+              <div class="tag-list">
+                <el-tag v-for="t in displayBusinessTags(row.businessTypes)" :key="t" size="small" type="info">
+                  {{ t }}
+                </el-tag>
+                <span v-if="!row.businessTypes || row.businessTypes.length === 0" class="cell-muted">—</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作员" min-width="180">
+            <template #default="{ row }">
+              <span v-if="row.operatorNames && row.operatorNames.length">{{ row.operatorNames.join(', ') }}</span>
+              <span v-else class="cell-muted">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="220" fixed="right" align="center">
+            <template #default="{ row }">
+              <el-button size="small" link type="primary" @click.stop="openEdit(row)">
+                <el-icon><Edit /></el-icon> 编辑
+              </el-button>
+              <el-button
+                v-if="row.status !== 'paused'"
+                size="small"
+                link
+                type="warning"
+                @click.stop="updateCounterStatus(row, 'paused')"
+              >
+                暂停
+              </el-button>
+              <el-button
+                v-else
+                size="small"
+                link
+                type="success"
+                @click.stop="updateCounterStatus(row, 'idle')"
+              >
+                恢复
+              </el-button>
+              <el-button size="small" link type="danger" @click.stop="handleDelete(row)">
+                <el-icon><Delete /></el-icon> 删除
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
 
       <div class="table-footer">
         <div class="selection-info">
@@ -156,6 +157,17 @@
           </el-button-group>
           <el-button v-if="selectedCounters.length" size="small" @click="clearSelection">清空选择</el-button>
         </div>
+      </div>
+
+      <div class="pagination-row">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :total="filteredCounters.length"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next, jumper"
+          small
+        />
       </div>
     </div>
 
@@ -358,6 +370,9 @@ const regionOperators = ref([])
 const loading = ref(false)
 
 const tableRef = ref(null)
+const tableContainerRef = ref(null)
+const tableHeight = ref(360)
+let tableResizeObserver = null
 const formRef = ref(null)
 
 const formRules = {
@@ -452,6 +467,75 @@ const filteredCounters = computed(() => {
   return result
 })
 
+const currentPage = ref(1)
+const pageSize = ref(10)
+
+const pagedCounters = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  return filteredCounters.value.slice(start, end)
+})
+
+let wheelAccumulatedDelta = 0
+let wheelResetTimer = null
+let lastWheelFlipAt = 0
+
+function getTableScrollWrap() {
+  return tableRef.value?.$el?.querySelector?.('.el-scrollbar__wrap') || null
+}
+
+function scrollTableToTop() {
+  const wrap = getTableScrollWrap()
+  if (wrap && typeof wrap.scrollTo === 'function') {
+    wrap.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+}
+
+function flipPage(delta) {
+  const total = filteredCounters.value.length
+  const maxPage = Math.max(1, Math.ceil(total / pageSize.value))
+  const next = Math.min(maxPage, Math.max(1, currentPage.value + delta))
+  if (next === currentPage.value) return
+  currentPage.value = next
+  nextTick(() => {
+    scrollTableToTop()
+  })
+}
+
+function onWheelPage(e) {
+  if (loading.value) return
+  const total = filteredCounters.value.length
+  if (!total) return
+  const maxPage = Math.max(1, Math.ceil(total / pageSize.value))
+  if (maxPage <= 1) return
+
+  const wrap = getTableScrollWrap()
+  const canScrollInPage = !!wrap && wrap.scrollHeight > wrap.clientHeight + 2
+  if (canScrollInPage) {
+    const atTop = wrap.scrollTop <= 1
+    const atBottom = wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 1
+    if ((e.deltaY > 0 && !atBottom) || (e.deltaY < 0 && !atTop)) {
+      return
+    }
+  }
+
+  const now = Date.now()
+  if (now - lastWheelFlipAt < 220) return
+
+  wheelAccumulatedDelta += e.deltaY
+  if (wheelResetTimer) clearTimeout(wheelResetTimer)
+  wheelResetTimer = setTimeout(() => {
+    wheelAccumulatedDelta = 0
+  }, 120)
+
+  if (Math.abs(wheelAccumulatedDelta) < 60) return
+  lastWheelFlipAt = now
+  const dir = wheelAccumulatedDelta > 0 ? 1 : -1
+  wheelAccumulatedDelta = 0
+  e.preventDefault?.()
+  flipPage(dir)
+}
+
 function getDescendantRegionIds(parentId, flatRegions) {
   const ids = new Set()
   flatRegions.forEach(r => {
@@ -530,6 +614,7 @@ function resetFilters() {
   filterRegionId.value = null
   filterStatus.value = ''
   filterKeyword.value = ''
+  currentPage.value = 1
   closeDetail()
   clearSelection()
 }
@@ -729,7 +814,7 @@ async function syncTableSelection() {
   tableRef.value.clearSelection()
   if (!selectedCounters.value.length) return
   const idSet = new Set(selectedCounters.value)
-  list.value.forEach(row => {
+  pagedCounters.value.forEach(row => {
     if (idSet.has(row.id)) tableRef.value.toggleRowSelection(row, true)
   })
 }
@@ -749,21 +834,28 @@ function onRowClick(row, column) {
 
 function displayBusinessTags(businessTypes) {
   if (!businessTypes || businessTypes.length === 0) return []
-  return businessTypes.slice(0, 2).map(b => b.name)
-}
-
-function extraBusinessCount(businessTypes) {
-  if (!businessTypes || businessTypes.length <= 2) return 0
-  return businessTypes.length - 2
+  return businessTypes.map(b => b.name)
 }
 
 onMounted(() => {
   fetchList()
   fetchRegions()
+  if (typeof ResizeObserver !== 'undefined') {
+    tableResizeObserver = new ResizeObserver((entries) => {
+      const entry = entries && entries[0]
+      const h = entry?.contentRect?.height
+      if (typeof h === 'number' && h > 0) tableHeight.value = Math.max(240, Math.floor(h))
+    })
+    if (tableContainerRef.value) tableResizeObserver.observe(tableContainerRef.value)
+  }
 })
 
 onUnmounted(() => {
   stopPolling()
+  if (tableResizeObserver) {
+    tableResizeObserver.disconnect()
+    tableResizeObserver = null
+  }
 })
 
 watch(detailVisible, (open) => {
@@ -772,12 +864,21 @@ watch(detailVisible, (open) => {
 })
 
 watch([filterRegionId, filterStatus], () => {
+  currentPage.value = 1
   closeDetail()
   clearSelection()
 })
 
 watch(filterKeyword, () => {
+  currentPage.value = 1
   closeDetail()
+})
+
+watch([currentPage, pageSize, filteredCounters], () => {
+  const total = filteredCounters.value.length
+  const maxPage = Math.max(1, Math.ceil(total / pageSize.value))
+  if (currentPage.value > maxPage) currentPage.value = maxPage
+  syncTableSelection()
 })
 </script>
 
@@ -928,6 +1029,11 @@ watch(filterKeyword, () => {
   min-height: 0;
 }
 
+.table-container {
+  flex: 1;
+  min-height: 0;
+}
+
 .table-footer {
   margin-top: var(--sp-3);
   display: flex;
@@ -937,6 +1043,12 @@ watch(filterKeyword, () => {
   background: #f7f8fa;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+}
+
+.pagination-row {
+  margin-top: var(--sp-3);
+  display: flex;
+  justify-content: flex-end;
 }
 
 .selection-info {
@@ -982,7 +1094,11 @@ watch(filterKeyword, () => {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  align-items: center;
+  align-items: flex-start;
+}
+
+.tag-list :deep(.el-tag) {
+  font-size: 12px;
 }
 
 .drawer-header {

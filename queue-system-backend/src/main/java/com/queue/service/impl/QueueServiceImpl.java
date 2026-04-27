@@ -46,6 +46,11 @@ public class QueueServiceImpl implements QueueService {
         return "queue:count:" + regionId + ":" + businessTypeId;
     }
 
+    private String completedHistoryKey(Long counterId) {
+        String date = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
+        return "counter:completed:" + counterId + ":" + date;
+    }
+
     public QueueServiceImpl(StringRedisTemplate stringRedisTemplate, TicketMapper ticketMapper) {
         this.stringRedisTemplate = stringRedisTemplate;
         this.ticketMapper = ticketMapper;
@@ -85,10 +90,18 @@ public class QueueServiceImpl implements QueueService {
     @Override
     public long getWaitingCount(Long regionId, Long businessTypeId) {
         if (regionId != null) {
-            String cached = stringRedisTemplate.opsForValue().get(waitingCountKey(regionId, businessTypeId));
+            String key = waitingCountKey(regionId, businessTypeId);
+            String cached = stringRedisTemplate.opsForValue().get(key);
             if (cached != null) {
                 try {
-                    return Long.parseLong(cached);
+                    long val = Long.parseLong(cached);
+                    if (val >= 0) {
+                        return val;
+                    }
+                    // 负数：缓存不准，从数据库修正
+                    long dbCount = loadWaitingCountFromDb(regionId, businessTypeId);
+                    stringRedisTemplate.opsForValue().set(key, String.valueOf(dbCount), WAITING_COUNT_TTL);
+                    return dbCount;
                 } catch (NumberFormatException ignored) {
                 }
             }
@@ -112,9 +125,17 @@ public class QueueServiceImpl implements QueueService {
     public void decrementWaitingCount(Long regionId, Long businessTypeId) {
         if (regionId == null) return;
         String key = waitingCountKey(regionId, businessTypeId);
+        Boolean hasKey = stringRedisTemplate.hasKey(key);
+        if (Boolean.FALSE.equals(hasKey)) {
+            long dbCount = loadWaitingCountFromDb(regionId, businessTypeId);
+            stringRedisTemplate.opsForValue().set(key, String.valueOf(dbCount), WAITING_COUNT_TTL);
+            return;
+        }
         Long val = stringRedisTemplate.opsForValue().decrement(key);
         if (val != null && val < 0) {
-            stringRedisTemplate.opsForValue().set(key, "0", WAITING_COUNT_TTL);
+            // 缓存不准，从数据库修正
+            long dbCount = loadWaitingCountFromDb(regionId, businessTypeId);
+            stringRedisTemplate.opsForValue().set(key, String.valueOf(dbCount), WAITING_COUNT_TTL);
             return;
         }
         stringRedisTemplate.expire(key, WAITING_COUNT_TTL);
@@ -124,12 +145,27 @@ public class QueueServiceImpl implements QueueService {
     public void incrementWaitingCount(Long regionId, Long businessTypeId) {
         if (regionId == null) return;
         String key = waitingCountKey(regionId, businessTypeId);
+        Boolean hasKey = stringRedisTemplate.hasKey(key);
+        if (Boolean.FALSE.equals(hasKey)) {
+            long dbCount = loadWaitingCountFromDb(regionId, businessTypeId);
+            stringRedisTemplate.opsForValue().set(key, String.valueOf(dbCount), WAITING_COUNT_TTL);
+            return;
+        }
         Long val = stringRedisTemplate.opsForValue().increment(key);
         if (val != null && val == 1L) {
             stringRedisTemplate.expire(key, WAITING_COUNT_TTL);
             return;
         }
         stringRedisTemplate.expire(key, WAITING_COUNT_TTL);
+    }
+
+    private long loadWaitingCountFromDb(Long regionId, Long businessTypeId) {
+        LambdaQueryWrapper<Ticket> wrapper = new LambdaQueryWrapper<Ticket>()
+                .eq(Ticket::getBusinessTypeId, businessTypeId)
+                .eq(Ticket::getStatus, TicketStatus.WAITING.getValue())
+                .eq(Ticket::getRegionId, regionId);
+        Long count = ticketMapper.selectCount(wrapper);
+        return count != null ? count : 0L;
     }
 
     @Override
@@ -170,5 +206,20 @@ public class QueueServiceImpl implements QueueService {
                 lockValueHolder.remove();
             }
         }
+    }
+
+    @Override
+    public void pushCompletedHistory(Long counterId, String json) {
+        String key = completedHistoryKey(counterId);
+        stringRedisTemplate.opsForList().leftPush(key, json);
+        // 自动过期到次日凌晨
+        stringRedisTemplate.expireAt(key, LocalDate.now().plusDays(1).atStartOfDay().toInstant(java.time.ZoneOffset.ofHours(8)));
+    }
+
+    @Override
+    public List<String> getCompletedHistory(Long counterId) {
+        String key = completedHistoryKey(counterId);
+        List<String> list = stringRedisTemplate.opsForList().range(key, 0, -1);
+        return list != null ? list : List.of();
     }
 }

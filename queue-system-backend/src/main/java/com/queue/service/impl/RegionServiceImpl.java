@@ -10,6 +10,7 @@ import com.queue.dto.RegionSortRequest;
 import com.queue.entity.Region;
 import com.queue.mapper.RegionMapper;
 import com.queue.service.RegionService;
+import com.queue.service.QrCodeRecordService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +25,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class RegionServiceImpl implements RegionService {
     private final RegionMapper regionMapper;
+    private final QrCodeRecordService qrCodeRecordService;
 
     @Override
     public List<Region> listByLevel(String level) {
@@ -117,7 +119,9 @@ public class RegionServiceImpl implements RegionService {
         if (!children.isEmpty()) {
             throw new BusinessException(ResultCode.SYSTEM_ERROR);
         }
-        // 物理删除（直接删除，不做软删除）
+        // 级联删除该区域的二维码记录
+        qrCodeRecordService.deleteByRegionIds(List.of(id));
+        // 物理删除区域
         regionMapper.physicalDeleteById(id);
     }
 

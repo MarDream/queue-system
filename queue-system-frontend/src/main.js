@@ -9,6 +9,36 @@ import App from './App.vue'
 import router from './router/index.js'
 import permissionDirective from './directives/permission.js'
 
+if (typeof window !== 'undefined') {
+  const shouldSuppressConnectionNoise = (value) => {
+    return String(value || '').includes('Could not establish connection. Receiving end does not exist')
+  }
+
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event?.reason
+    const message = typeof reason === 'string' ? reason : (reason?.message || '')
+    if (
+      shouldSuppressConnectionNoise(message) ||
+      shouldSuppressConnectionNoise(reason) ||
+      shouldSuppressConnectionNoise(reason?.message) ||
+      shouldSuppressConnectionNoise(reason?.toString?.())
+    ) {
+      event.preventDefault()
+      event.stopImmediatePropagation?.()
+    }
+  }, true)
+
+  window.addEventListener('error', (event) => {
+    if (
+      shouldSuppressConnectionNoise(event?.message) ||
+      shouldSuppressConnectionNoise(event?.error) ||
+      shouldSuppressConnectionNoise(event?.error?.message)
+    ) {
+      event.preventDefault()
+    }
+  }, true)
+}
+
 const app = createApp(App)
 const pinia = createPinia()
 

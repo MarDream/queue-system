@@ -44,7 +44,7 @@
       <div class="filter-group">
         <el-input
           v-model="searchKeyword"
-          placeholder="搜索用户名/姓名"
+          placeholder="搜索用户名/姓名/角色"
           prefix-icon="Search"
           clearable
           style="width: 220px"
@@ -171,6 +171,7 @@
             clearable
             check-strictly
             :render-after-expand="false"
+            :fallback-option="false"
             filterable
             :filter-method="filterRegionByName"
             style="width:100%"
@@ -462,7 +463,8 @@ const filteredList = computed(() => {
     result = result.filter(u =>
       u.username?.toLowerCase().includes(kw) ||
       u.name?.toLowerCase().includes(kw) ||
-      u.email?.toLowerCase().includes(kw)
+      u.email?.toLowerCase().includes(kw) ||
+      getRoleName(u.role)?.toLowerCase().includes(kw)
     )
   }
   return result
@@ -537,14 +539,17 @@ function openCreate() {
 
 function openEdit(row) {
   isEdit.value = true
+  // 如果 regionId 在区域树中找不到，清空为 null 避免显示数字 ID
+  const rid = row.regionId
+  const validRegion = rid ? regions.value.find(r => Number(r.id) === Number(rid)) : null
   form.value = {
     id: row.id,
     username: row.username,
     name: row.name,
     email: row.email || '',
     role: row.role,
-    regionId: row.regionId,
-    regionCode: '',
+    regionId: validRegion ? rid : null,
+    regionCode: validRegion ? (validRegion.code || validRegion.regionCode || '') : '',
     status: row.status,
     password: ''
   }

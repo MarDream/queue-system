@@ -17,6 +17,9 @@ import com.queue.mapper.RegionMapper;
 import com.queue.mapper.TicketMapper;
 import com.queue.service.CounterService;
 import com.queue.service.QueueService;
+import com.queue.service.RegionService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,19 +36,23 @@ public class CounterServiceImpl implements CounterService {
     private final QueueService queueService;
     private final BusinessTypeMapper businessTypeMapper;
     private final RegionMapper regionMapper;
+    private final RegionService regionService;
+    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
     public CounterServiceImpl(CounterMapper counterMapper,
                               CounterBusinessMapper counterBusinessMapper,
                               TicketMapper ticketMapper,
                               QueueService queueService,
                               BusinessTypeMapper businessTypeMapper,
-                              RegionMapper regionMapper) {
+                              RegionMapper regionMapper,
+                              RegionService regionService) {
         this.counterMapper = counterMapper;
         this.counterBusinessMapper = counterBusinessMapper;
         this.ticketMapper = ticketMapper;
         this.queueService = queueService;
         this.businessTypeMapper = businessTypeMapper;
         this.regionMapper = regionMapper;
+        this.regionService = regionService;
     }
 
     @Override
@@ -69,15 +76,18 @@ public class CounterServiceImpl implements CounterService {
             LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
             LocalDateTime endOfDay = startOfDay.plusDays(1);
 
+            // 获取窗口所属区域及所有子区域ID
+            List<Long> regionIds = regionService.getDescendantRegionIds(counter.getRegionId());
+
             // 从数据库查询当前窗口支持业务类型中最早的等待票
+            // 排序优先级：被激活的票优先（按激活时间排序），普通票按创建时间排序
             QueryWrapper<Ticket> wrapper = new QueryWrapper<>();
             wrapper.in("business_type_id", businessTypeIds)
-                   .eq("region_id", counter.getRegionId())
+                   .in("region_id", regionIds)
                    .eq("status", TicketStatus.WAITING.getValue())
                    .ge("created_at", startOfDay)
                    .lt("created_at", endOfDay)
-                   .orderByAsc("created_at")
-                   .last("LIMIT 1");
+                   .last("ORDER BY IF(reactivated_at IS NULL, 1, 0) ASC, reactivated_at ASC, created_at ASC LIMIT 1");
             Ticket bestTicket = ticketMapper.selectOne(wrapper);
 
             if (bestTicket == null) {
@@ -225,11 +235,29 @@ public class CounterServiceImpl implements CounterService {
 
             ticket.setStatus(TicketStatus.COMPLETED.getValue());
             ticket.setCompletedAt(LocalDateTime.now());
+            // 未经过"开始服务"直接办结时，用叫号时间作为办理开始时间
+            if (ticket.getServedAt() == null && ticket.getCalledAt() != null) {
+                ticket.setServedAt(ticket.getCalledAt());
+            }
             ticketMapper.updateById(ticket);
 
             counter.setStatus(CounterStatus.IDLE.getValue());
             counter.setCurrentTicketId(null);
             counterMapper.updateById(counter);
+
+            // 推送办结记录到Redis，供前端拉取历史
+            try {
+                java.util.Map<String, Object> record = new java.util.LinkedHashMap<>();
+                record.put("id", System.currentTimeMillis());
+                record.put("time", java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")));
+                record.put("number", ticket.getTicketNo());
+                record.put("biz", businessTypeMapper.selectById(ticket.getBusinessTypeId()).getName());
+                long durationSeconds = java.time.Duration.between(ticket.getServedAt(), ticket.getCompletedAt()).toSeconds();
+                record.put("duration", Math.max(1, (int) Math.round(durationSeconds / 60.0)));
+                queueService.pushCompletedHistory(counterId, objectMapper.writeValueAsString(record));
+            } catch (Exception e) {
+                // 非关键路径，静默失败
+            }
         } finally {
             queueService.releaseLock(lockKey);
         }
@@ -284,10 +312,11 @@ public class CounterServiceImpl implements CounterService {
             throw new BusinessException(50001, "只能重新激活当日过号的票");
         }
 
-        // 重新激活：状态改为等待，清空过号类型，counterId 置空
+        // 重新激活：状态改为等待，清空过号类型，counterId 置空，记录激活时间
         ticket.setStatus(TicketStatus.WAITING.getValue());
         ticket.setSkipType(null);
         ticket.setCounterId(null);
+        ticket.setReactivatedAt(LocalDateTime.now());
         ticketMapper.updateById(ticket);
 
         // 重新加入等待队列（队首）

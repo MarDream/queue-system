@@ -36,6 +36,7 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -123,7 +124,15 @@ public class AdminController {
         if (userId != null && userId > 0) {
             SysUser user = sysUserMapper.selectById(userId);
             if (user != null && !"SUPER_ADMIN".equals(user.getRole())) {
-                if (user.getRegionCode() != null && !user.getRegionCode().isEmpty()) {
+                List<Long> scopedRoots = sysUserMapper.selectRegionScopeIds(userId);
+                if (scopedRoots != null && !scopedRoots.isEmpty()) {
+                    Set<Long> all = new HashSet<>();
+                    for (Long rid : scopedRoots) {
+                        if (rid == null) continue;
+                        all.addAll(regionService.getDescendantRegionIds(rid));
+                    }
+                    allowedRegionIds = all;
+                } else if (user.getRegionCode() != null && !user.getRegionCode().isEmpty()) {
                     Region userRegion = regionService.getByCode(user.getRegionCode());
                     if (userRegion != null) {
                         List<Long> descendants = regionService.getDescendantRegionIds(userRegion.getId());
@@ -463,17 +472,35 @@ public class AdminController {
         if (user == null || "SUPER_ADMIN".equals(user.getRole())) {
             return;
         }
-        if (user.getRegionCode() == null || user.getRegionCode().isEmpty()) {
+        Set<Long> allowed = resolveAllowedRegionIds(user);
+        if (allowed.isEmpty() || !allowed.contains(regionId)) {
             throw new BusinessException(403, "无权限操作该区域");
         }
-        Region userRegion = regionService.getByCode(user.getRegionCode());
-        if (userRegion == null) {
-            throw new BusinessException(403, "无权限操作该区域");
+    }
+
+    private Set<Long> resolveAllowedRegionIds(SysUser user) {
+        if (user == null || "SUPER_ADMIN".equals(user.getRole())) {
+            return null;
         }
-        List<Long> allowed = regionService.getDescendantRegionIds(userRegion.getId());
-        if (!allowed.contains(regionId)) {
-            throw new BusinessException(403, "无权限操作该区域");
+        List<Long> scopedRoots = sysUserMapper.selectRegionScopeIds(user.getId());
+        if (scopedRoots != null && !scopedRoots.isEmpty()) {
+            Set<Long> all = new HashSet<>();
+            for (Long rid : scopedRoots) {
+                if (rid == null) continue;
+                all.addAll(regionService.getDescendantRegionIds(rid));
+            }
+            return all;
         }
+
+        Long rootId = user.getRegionId();
+        if (rootId == null && user.getRegionCode() != null && !user.getRegionCode().isEmpty()) {
+            Region r = regionService.getByCode(user.getRegionCode());
+            rootId = r == null ? null : r.getId();
+        }
+        if (rootId == null) {
+            return Collections.emptySet();
+        }
+        return new HashSet<>(regionService.getDescendantRegionIds(rootId));
     }
 
     // Ticket list for admin
@@ -491,12 +518,8 @@ public class AdminController {
         if (userId != null && userId > 0) {
             SysUser user = sysUserMapper.selectById(userId);
             if (user != null && !"SUPER_ADMIN".equals(user.getRole())) {
-                if (user.getRegionId() != null) {
-                    List<Long> descendants = regionService.getDescendantRegionIds(user.getRegionId());
-                    allowedRegionIds = descendants.stream().collect(Collectors.toSet());
-                } else {
-                    allowedRegionIds = Collections.emptySet();
-                }
+                Set<Long> allowed = resolveAllowedRegionIds(user);
+                allowedRegionIds = allowed == null ? null : allowed;
             }
         }
         return Result.ok(ticketService.listTickets(status, date, startDate, endDate, phone, name, ticketNo, allowedRegionIds));
@@ -510,17 +533,8 @@ public class AdminController {
         if (userId != null && userId > 0) {
             SysUser user = sysUserMapper.selectById(userId);
             if (user != null && !"SUPER_ADMIN".equals(user.getRole())) {
-                if (user.getRegionCode() != null && !user.getRegionCode().isEmpty()) {
-                    Region userRegion = regionService.getByCode(user.getRegionCode());
-                    if (userRegion != null) {
-                        List<Long> descendants = regionService.getDescendantRegionIds(userRegion.getId());
-                        allowedRegionIds = descendants.stream().collect(Collectors.toSet());
-                    } else {
-                        allowedRegionIds = Collections.emptySet();
-                    }
-                } else {
-                    allowedRegionIds = Collections.emptySet();
-                }
+                Set<Long> allowed = resolveAllowedRegionIds(user);
+                allowedRegionIds = allowed == null ? null : allowed;
             }
         }
         return Result.ok(businessTypeService.getBusinessTypeDetail(id, allowedRegionIds));

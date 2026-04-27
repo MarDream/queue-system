@@ -55,7 +55,18 @@ public class QrCodeRecordServiceImpl implements QrCodeRecordService {
 
     @Override
     public void delete(Long id) {
-        // 物理删除（直接删除，不做软删除）
         mapper.physicalDeleteById(id);
+    }
+
+    @Override
+    public void deleteByIds(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return;
+        mapper.physicalDeleteByIds(ids);
+    }
+
+    @Override
+    public void deleteByRegionIds(List<Long> regionIds) {
+        if (regionIds == null || regionIds.isEmpty()) return;
+        mapper.physicalDeleteByRegionIds(regionIds);
     }
 }

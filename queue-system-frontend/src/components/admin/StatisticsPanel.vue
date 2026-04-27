@@ -31,7 +31,7 @@
           <el-option label="已完成" value="completed" />
           <el-option label="已取消" value="cancelled" />
         </el-select>
-        <el-button type="primary" @click="loadData" :loading="loading">
+        <el-button type="primary" @click="doQuery" :loading="loading">
           <el-icon><Search /></el-icon> 查询
         </el-button>
         <el-button @click="resetFilter">
@@ -72,7 +72,7 @@
         </el-table-column>
         <el-table-column v-if="isColumnVisible('customerName')" prop="customerName" label="预约人姓名" min-width="120" sortable="custom" />
         <el-table-column v-if="isColumnVisible('ticketNo')" prop="ticketNo" label="票号" min-width="100" sortable="custom">
-          <template #default="{ row }">{{ getTicketNo(row.ticketNo) }}</template>
+          <template #default="{ row }">{{ getDisplayTicketNo(row.ticketNo) }}</template>
         </el-table-column>
         <el-table-column v-if="isColumnVisible('createdAt')" prop="createdAt" label="预约时间" min-width="180" sortable="custom">
           <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
@@ -95,18 +95,19 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right" v-if="hasReactivatePermission">
+        <el-table-column label="操作" width="70" fixed="right" align="center" v-if="hasReactivatePermission">
           <template #default="{ row }">
-            <el-button
-              v-if="row.ticketStatus === 'skipped' && row.skipType === 'manual'"
-              type="primary"
-              link
-              size="small"
-              @click="handleReactivate(row)"
-              :loading="row.reactivating"
-            >
-              重新激活
-            </el-button>
+            <el-tooltip v-if="row.ticketStatus === 'skipped' && row.skipType === 'manual'" content="重新激活" placement="top">
+              <el-button
+                type="primary"
+                link
+                size="small"
+                @click="handleReactivate(row)"
+                :loading="row.reactivating"
+              >
+                <el-icon :size="16"><RefreshRight /></el-icon>
+              </el-button>
+            </el-tooltip>
             <span v-else style="color: var(--text-muted); font-size: 12px;">-</span>
           </template>
         </el-table-column>
@@ -155,13 +156,14 @@ import request from '../../api/index'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '../../stores/user'
 import { Search, RefreshRight, Download, Setting, Tickets } from '@element-plus/icons-vue'
+import { getDisplayTicketNo } from '../../utils/ticketUtils'
 
 const userStore = useUserStore()
 
 // 检查是否有重新激活权限
 const hasReactivatePermission = computed(() => {
   if (userStore.isSuperAdmin) return true
-  const buttons = userStore.buttons || []
+  const buttons = userStore.buttonCodes || []
   return buttons.includes('btn:reactivate')
 })
 
@@ -296,11 +298,19 @@ async function loadData() {
   try {
     filter.startDate = filter.dateRange?.[0] || null
     filter.endDate = filter.dateRange?.[1] || null
+    const statusParams = {}
+    if (filter.status === 'skipped') {
+      statusParams.status = 'skipped'
+      statusParams.skipType = 'manual'
+    } else if (filter.status) {
+      statusParams.status = filter.status
+    }
     const res = await statisticsApi.list({
       regionId: filter.regionId,
       businessTypeId: filter.businessTypeId,
       startDate: filter.startDate,
       endDate: filter.endDate,
+      ...statusParams,
       pageNum: pagination.pageNum,
       pageSize: pagination.pageSize,
       sortProp: sortConfig.prop,
@@ -315,10 +325,16 @@ async function loadData() {
   }
 }
 
+function doQuery() {
+  pagination.pageNum = 1
+  loadData()
+}
+
 function resetFilter() {
   filter.regionId = null
   filter.businessTypeId = null
   filter.dateRange = null
+  filter.status = null
   pagination.pageNum = 1
   loadData()
 }
@@ -326,11 +342,19 @@ function resetFilter() {
 function handleExport() {
   filter.startDate = filter.dateRange?.[0] || null
   filter.endDate = filter.dateRange?.[1] || null
+  const statusParams = {}
+  if (filter.status === 'skipped') {
+    statusParams.status = 'skipped'
+    statusParams.skipType = 'manual'
+  } else if (filter.status) {
+    statusParams.status = filter.status
+  }
   statisticsApi.export({
     regionId: filter.regionId,
     businessTypeId: filter.businessTypeId,
     startDate: filter.startDate,
-    endDate: filter.endDate
+    endDate: filter.endDate,
+    ...statusParams
   })
 }
 
@@ -359,17 +383,6 @@ function formatDateTime(val) {
   const datePart = str.substring(0, 10)
   const timePart = str.substring(11, 19)
   return `${datePart} ${timePart}`
-}
-
-// 票号去区域前缀，如 "440305A004" -> "A004"
-function getTicketNo(ticketNo) {
-  if (!ticketNo) return '-'
-  // 区域编码通常是6位数字开头
-  const match = ticketNo.match(/^\d{6}(.+)$/)
-  if (match) return match[1]
-  // 也处理 "GZ-A001" 格式
-  const parts = ticketNo.split('-')
-  return parts.length > 1 ? parts.slice(1).join('-') : ticketNo
 }
 
 function statusText(status) {
@@ -403,8 +416,8 @@ async function handleReactivate(row) {
   }
   row.reactivating = true
   try {
-    await counterApi.reactivate(row.ticketNo)
-    ElMessage.success(`票号 ${getTicketNo(row.ticketNo)} 已重新激活到队首`)
+    await reactivate(row.ticketNo)
+    ElMessage.success(`票号 ${getDisplayTicketNo(row.ticketNo)} 已重新激活到队首`)
     loadData()
   } catch (err) {
     ElMessage.error(err.message || '激活失败')

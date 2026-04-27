@@ -57,6 +57,7 @@ public class ScreenDataResponse {
         private Long id;
         private String ticketNo;
         private String businessTypeName;
+        private Boolean reactivated;
     }
 
     @Data

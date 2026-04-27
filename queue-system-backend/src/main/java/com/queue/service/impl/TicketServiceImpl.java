@@ -452,6 +452,7 @@ public class TicketServiceImpl implements TicketService {
             vo.setServedAt(t.getServedAt());
             vo.setCompletedAt(t.getCompletedAt());
             vo.setSkipType(t.getSkipType());
+            vo.setReactivated(t.getReactivatedAt() != null);
             return vo;
         }).toList();
     }
@@ -468,9 +469,11 @@ public class TicketServiceImpl implements TicketService {
             ticket.setStatus(TicketStatus.SKIPPED.getValue());
             ticket.setSkipType(com.queue.enums.SkipType.SYSTEM.getValue()); // 系统过号
             ticketMapper.updateById(ticket);
-            // 从 Redis 队列移除
-            queueService.dequeue(ticket.getRegionId(), ticket.getBusinessTypeId(), ticketId);
-            queueService.decrementWaitingCount(ticket.getRegionId(), ticket.getBusinessTypeId());
+            // 仅等待中的票需要从队列移除并扣减等待人数，已叫号/服务中的票已在 callNext 时移除
+            if (TicketStatus.WAITING.getValue().equals(status)) {
+                queueService.dequeue(ticket.getRegionId(), ticket.getBusinessTypeId(), ticketId);
+                queueService.decrementWaitingCount(ticket.getRegionId(), ticket.getBusinessTypeId());
+            }
         }
     }
 
@@ -485,11 +488,15 @@ public class TicketServiceImpl implements TicketService {
                 .lt("created_at", startOfToday)
         );
         for (Ticket ticket : expiredTickets) {
+            boolean wasWaiting = TicketStatus.WAITING.getValue().equals(ticket.getStatus());
             ticket.setStatus(TicketStatus.SKIPPED.getValue());
             ticket.setSkipType(com.queue.enums.SkipType.SYSTEM.getValue()); // 系统过号
             ticketMapper.updateById(ticket);
-            queueService.dequeue(ticket.getRegionId(), ticket.getBusinessTypeId(), ticket.getId());
-            queueService.decrementWaitingCount(ticket.getRegionId(), ticket.getBusinessTypeId());
+            // 仅等待中的票需要从队列移除并扣减等待人数，已叫号/服务中的票已在 callNext 时移除
+            if (wasWaiting) {
+                queueService.dequeue(ticket.getRegionId(), ticket.getBusinessTypeId(), ticket.getId());
+                queueService.decrementWaitingCount(ticket.getRegionId(), ticket.getBusinessTypeId());
+            }
         }
         return expiredTickets.size();
     }

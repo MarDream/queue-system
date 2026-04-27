@@ -27,7 +27,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/v1/qrcode")
@@ -90,6 +89,30 @@ public class QrCodeController {
             if (user != null) {
                 createdBy = user.getName();
                 if (!"SUPER_ADMIN".equals(user.getRole())) {
+                    List<Long> scopedRoots = sysUserMapper.selectRegionScopeIds(userId);
+                    if (scopedRoots != null && !scopedRoots.isEmpty()) {
+                        Set<Long> allowedSet = new HashSet<>();
+                        for (Long rid : scopedRoots) {
+                            if (rid == null) continue;
+                            allowedSet.addAll(regionService.getDescendantRegionIds(rid));
+                        }
+                        if (!allowedSet.contains(region.getId())) {
+                            return Result.error(403, "无权操作该区域");
+                        }
+                        String url = effectiveBaseUrl + "/appointment?region=" + region.getRegionCode();
+                        QrCodeRecord record = qrCodeRecordService.saveOrUpdate(region.getId(), region.getRegionCode(), region.getRegionName(), url, createdBy);
+
+                        Map<String, Object> data = new HashMap<>();
+                        data.put("id", record.getId());
+                        data.put("regionId", region.getId());
+                        data.put("regionCode", region.getRegionCode());
+                        data.put("regionName", region.getRegionName());
+                        data.put("url", url);
+                        data.put("createdAt", record.getCreatedAt());
+                        data.put("createdBy", record.getCreatedBy());
+                        return Result.ok(data);
+                    }
+
                     if (user.getRegionCode() == null || user.getRegionCode().isEmpty()) {
                         return Result.error(403, "无权操作该区域");
                     }
@@ -161,15 +184,27 @@ public class QrCodeController {
         if (user == null || "SUPER_ADMIN".equals(user.getRole())) {
             return Result.ok(allRecords);
         }
-        if (user.getRegionCode() == null || user.getRegionCode().isEmpty()) {
+        List<Long> scopedRoots = sysUserMapper.selectRegionScopeIds(userId);
+        Set<Long> allowedSet = new HashSet<>();
+        if (scopedRoots != null && !scopedRoots.isEmpty()) {
+            for (Long rid : scopedRoots) {
+                if (rid == null) continue;
+                allowedSet.addAll(regionService.getDescendantRegionIds(rid));
+            }
+        } else {
+            if (user.getRegionCode() == null || user.getRegionCode().isEmpty()) {
+                return Result.ok(List.of());
+            }
+            Region userRegion = regionService.getByCode(user.getRegionCode());
+            if (userRegion == null) {
+                return Result.ok(List.of());
+            }
+            List<Long> allowedRegionIds = regionService.getDescendantRegionIds(userRegion.getId());
+            allowedSet.addAll(allowedRegionIds);
+        }
+        if (allowedSet.isEmpty()) {
             return Result.ok(List.of());
         }
-        Region userRegion = regionService.getByCode(user.getRegionCode());
-        if (userRegion == null) {
-            return Result.ok(List.of());
-        }
-        List<Long> allowedRegionIds = regionService.getDescendantRegionIds(userRegion.getId());
-        Set<Long> allowedSet = new HashSet<>(allowedRegionIds);
         return Result.ok(allRecords.stream()
             .filter(r -> allowedSet.contains(r.getRegionId()))
             .collect(Collectors.toList()));
@@ -178,6 +213,13 @@ public class QrCodeController {
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         qrCodeRecordService.delete(id);
+        return Result.ok();
+    }
+
+    @DeleteMapping("/batch")
+    public Result<Void> batchDelete(@RequestBody Map<String, List<Long>> body) {
+        List<Long> ids = body.get("ids");
+        qrCodeRecordService.deleteByIds(ids);
         return Result.ok();
     }
 }

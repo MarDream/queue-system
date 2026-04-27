@@ -1,3 +1,4 @@
+import axios from 'axios'
 import request from './index'
 import type { BusinessType, Counter, CounterDTO, Region, SysMenu, SysButton, SysRole } from '../types'
 
@@ -129,6 +130,8 @@ export const statisticsApi = {
     businessTypeId?: number;
     startDate?: string;
     endDate?: string;
+    status?: string;
+    skipType?: string;
     pageNum?: number;
     pageSize?: number;
     sortProp?: string;
@@ -140,6 +143,8 @@ export const statisticsApi = {
     businessTypeId?: number;
     startDate?: string;
     endDate?: string;
+    status?: string;
+    skipType?: string;
   }) => {
     const url = new URL('/api/v1/admin/statistics/export', window.location.origin)
     if (params) {
@@ -148,6 +153,51 @@ export const statisticsApi = {
       })
     }
     window.open(url.toString(), '_blank')
+  }
+}
+
+export const aiQueryApi = {
+  ask: (data: {
+    workspace?: string;
+    sessionId?: string;
+    question: string;
+    counterId?: number;
+    businessTypeId?: number;
+    regionId?: number;
+    limit?: number;
+  }) => request.post<any, any>('/admin/ai/ask', data),
+
+  listSessions: (workspace = 'admin') =>
+    request.get<any, any>('/admin/ai/sessions', { params: { workspace } }),
+
+  getMessages: (sessionId: string, workspace = 'admin') =>
+    request.get<any, any>(`/admin/ai/sessions/${sessionId}/messages`, { params: { workspace } }),
+
+  deleteSession: (sessionId: string, workspace = 'admin') =>
+    request.delete<any, any>(`/admin/ai/sessions/${sessionId}`, { params: { workspace } }),
+
+  exportXlsx: async (params: { sessionId: string; workspace?: string }) => {
+    const token = localStorage.getItem('token')
+    const headers: Record<string, string> = {}
+    if (token && token.trim() && token.trim() !== 'undefined' && token.trim() !== 'null') {
+      headers.Authorization = `Bearer ${token.trim()}`
+    }
+
+    const resp = await axios.get('/api/v1/admin/ai/export', {
+      params: { sessionId: params.sessionId, workspace: params.workspace || 'admin' },
+      responseType: 'blob',
+      headers
+    })
+
+    const blob = resp.data
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `ai_export_${Date.now()}.xlsx`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
   }
 }
 

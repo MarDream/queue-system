@@ -192,4 +192,19 @@ public class SysUserController {
         Long operatorId = (Long) request.getAttribute("userId");
         return Result.ok(sysUserService.getAvailableButtonsForTargetUser(operatorId, id));
     }
+
+    @GetMapping("/{id}/region-scopes")
+    public Result<List<Long>> getRegionScopes(@PathVariable Long id, jakarta.servlet.http.HttpServletRequest request) {
+        Long operatorId = (Long) request.getAttribute("userId");
+        return Result.ok(sysUserService.getUserRegionScopes(operatorId, id));
+    }
+
+    @PutMapping("/{id}/region-scopes")
+    public Result<Void> setRegionScopes(@PathVariable Long id,
+                                        @RequestBody List<Long> regionIds,
+                                        jakarta.servlet.http.HttpServletRequest request) {
+        Long operatorId = (Long) request.getAttribute("userId");
+        sysUserService.setUserRegionScopes(operatorId, id, regionIds);
+        return Result.ok();
+    }
 }

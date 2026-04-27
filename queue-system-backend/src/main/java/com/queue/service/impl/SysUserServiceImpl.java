@@ -44,6 +44,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.security.SecureRandom;
@@ -961,5 +962,62 @@ public class SysUserServiceImpl implements SysUserService {
                 .eq(SysButton::getDeleted, 0)
                 .orderByAsc(SysButton::getSortOrder)
         );
+    }
+
+    @Override
+    public List<Long> getUserRegionScopes(Long operatorId, Long targetUserId) {
+        SysUser operator = operatorId == null ? null : sysUserMapper.selectById(operatorId);
+        SysUser target = targetUserId == null ? null : sysUserMapper.selectById(targetUserId);
+        if (operator == null) {
+            throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "请先登录");
+        }
+        if (target == null) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "用户不存在");
+        }
+        validateRegionScopePermission(operator, target);
+        List<Long> scopes = sysUserMapper.selectRegionScopeIds(targetUserId);
+        return scopes == null ? new ArrayList<>() : scopes;
+    }
+
+    @Override
+    @Transactional
+    public void setUserRegionScopes(Long operatorId, Long targetUserId, List<Long> regionIds) {
+        SysUser operator = operatorId == null ? null : sysUserMapper.selectById(operatorId);
+        SysUser target = targetUserId == null ? null : sysUserMapper.selectById(targetUserId);
+        if (operator == null) {
+            throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "请先登录");
+        }
+        if (target == null) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "用户不存在");
+        }
+        validateRegionScopePermission(operator, target);
+
+        List<Long> ids = regionIds == null
+            ? new ArrayList<>()
+            : regionIds.stream().filter(Objects::nonNull).distinct().collect(Collectors.toList());
+
+        if ("REGION_ADMIN".equals(operator.getRole())) {
+            List<Long> allowed = getAllowedRegionIds(operator.getRegionId());
+            Set<Long> allowedSet = new HashSet<>(allowed == null ? new ArrayList<>() : allowed);
+            for (Long rid : ids) {
+                if (!allowedSet.contains(rid)) {
+                    throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "无权分配该区域范围");
+                }
+            }
+        }
+
+        sysUserMapper.deleteRegionScopes(targetUserId);
+        for (Long rid : ids) {
+            sysUserMapper.insertRegionScope(targetUserId, rid);
+        }
+    }
+
+    private void validateRegionScopePermission(SysUser operator, SysUser target) {
+        if (!"SUPER_ADMIN".equals(operator.getRole()) && !"REGION_ADMIN".equals(operator.getRole())) {
+            throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "无权限操作");
+        }
+        if ("REGION_ADMIN".equals(operator.getRole()) && !"WINDOW_OPERATOR".equals(target.getRole())) {
+            throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "只能为窗口操作员配置区域范围");
+        }
     }
 }

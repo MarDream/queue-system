@@ -14,6 +14,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -222,6 +223,17 @@ public class RegionController {
         if (user == null || "SUPER_ADMIN".equals(user.getRole())) {
             return null; // 不过滤
         }
+
+        List<Long> scopedRoots = sysUserMapper.selectRegionScopeIds(userId);
+        if (scopedRoots != null && !scopedRoots.isEmpty()) {
+            Set<Long> all = new HashSet<>();
+            for (Long rid : scopedRoots) {
+                if (rid == null) continue;
+                all.addAll(regionService.getDescendantRegionIds(rid));
+            }
+            return new ArrayList<>(all);
+        }
+
         if (user.getRegionCode() == null || user.getRegionCode().isEmpty()) {
             return Collections.emptyList();
         }

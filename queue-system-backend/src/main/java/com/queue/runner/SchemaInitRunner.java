@@ -67,6 +67,12 @@ public class SchemaInitRunner implements CommandLineRunner {
 
             // 迁移：添加重新激活按钮权限
             migrateReactivateButton(conn);
+
+            // 迁移：添加 reactivated_at 字段
+            migrateReactivatedAt(conn);
+
+            // 迁移：添加智能问数菜单（仅超级管理员）
+            migrateAiMenu(conn);
         }
     }
 
@@ -145,6 +151,59 @@ public class SchemaInitRunner implements CommandLineRunner {
             }
         } catch (Exception e) {
             System.err.println("重新激活按钮迁移失败: " + e.getMessage());
+        }
+    }
+
+    private void migrateReactivatedAt(Connection conn) {
+        try {
+            DatabaseMetaData metaData = conn.getMetaData();
+            boolean columnExists = false;
+            try (ResultSet columns = metaData.getColumns(null, null, "ticket", "reactivated_at")) {
+                columnExists = columns.next();
+            }
+            if (!columnExists) {
+                System.out.println("检测到 ticket 表缺少 reactivated_at 字段，开始迁移...");
+                try (Statement stmt = conn.createStatement()) {
+                    stmt.execute("ALTER TABLE ticket ADD COLUMN reactivated_at DATETIME COMMENT '重新激活时间，用于排序优先叫号'");
+                    System.out.println("ticket.reactivated_at 字段添加成功");
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("reactivated_at 字段迁移失败: " + e.getMessage());
+        }
+    }
+
+    private void migrateAiMenu(Connection conn) {
+        try {
+            Long adminMenuId = null;
+            try (var rs = conn.createStatement().executeQuery(
+                    "SELECT id FROM sys_menu WHERE path = '/admin' LIMIT 1")) {
+                if (rs.next()) {
+                    adminMenuId = rs.getLong(1);
+                }
+            }
+            if (adminMenuId == null) {
+                return;
+            }
+
+            boolean exists = false;
+            try (var rs = conn.createStatement().executeQuery(
+                    "SELECT COUNT(*) FROM sys_menu WHERE path = '/admin?tab=ai'")) {
+                if (rs.next()) {
+                    exists = rs.getInt(1) > 0;
+                }
+            }
+            if (!exists) {
+                try (Statement stmt = conn.createStatement()) {
+                    stmt.execute("INSERT INTO sys_menu (name, path, icon, sort_order, parent_id, type) VALUES " +
+                            "('智能问数', '/admin?tab=ai', 'ChatDotRound', 13, " + adminMenuId + ", 'menu')");
+                    stmt.execute("INSERT IGNORE INTO sys_role_menu (role_id, role_code, menu_id) " +
+                            "SELECT r.id, r.code, m.id FROM sys_role r, sys_menu m " +
+                            "WHERE r.code = 'SUPER_ADMIN' AND m.path = '/admin?tab=ai'");
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("智能问数菜单迁移失败: " + e.getMessage());
         }
     }
 }
