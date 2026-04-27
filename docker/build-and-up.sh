@@ -4,6 +4,7 @@ set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+ENV_FILE="$SCRIPT_DIR/.env"
 IMAGE_TAG="${1:-}"
 
 if [ -z "$IMAGE_TAG" ]; then
@@ -22,7 +23,13 @@ if [ ! -f "$COMPOSE_FILE" ]; then
   exit 1
 fi
 
+if [ ! -f "$ENV_FILE" ]; then
+  echo "ERROR: Env file not found: $ENV_FILE"
+  echo "Copy docker/.env.remote.example to docker/.env and fill in production values first."
+  exit 1
+fi
+
 echo "[queue-system] Compose file: $COMPOSE_FILE"
 echo "[queue-system] Starting backend container only"
 
-docker compose -f "$COMPOSE_FILE" up -d --build backend
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build backend

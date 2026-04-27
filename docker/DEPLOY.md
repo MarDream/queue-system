@@ -1,125 +1,105 @@
-# 排队叫号系统 - 公网云 Docker 部署手册
+# 排队叫号系统 Docker 部署手册
 
-## 1. 适用场景
+## 结论
 
-本方案适用于以下环境：
+如果你的远端服务器已经通过 Docker 跑着 MySQL、Redis、Nginx，最简单的发布方式不是“本地构建镜像再推远端仓库”，而是：
 
-- 云服务器公网 IP：`43.155.249.87`
-- 操作系统：Linux
-- MySQL、Redis、Nginx 已经在云服务器上独立部署
-- Docker 仅负责运行后端服务
-- 前端通过独立 Nginx 托管 `dist/` 并对外提供访问
+1. 服务器上保留这份源码仓库
+2. 第一次把 `docker/.env` 配好
+3. 以后每次更新只执行：
 
-镜像命名固定为：
-
-- 后端：`queue-backend`
-
-镜像 tag 规则：
-
-- 手动传入版本号时，后端使用传入的 `IMAGE_TAG`
-- 未手动传入时，默认使用打包当下的时间戳（格式：`yyyyMMddHHmmss`）
-
-## 2. 目录结构
-
-```text
-docker/
-├── docker-compose.standalone.yml   # 独立部署编排（仅 backend）
-├── build-and-up.sh                 # 自动生成 tag 或使用手动指定版本后构建并启动 backend
-├── push-image.sh                   # 本地打包 backend 镜像并推送到远端 Registry
-├── backend/
-│   ├── Dockerfile
-│   ├── .dockerignore
-│   └── config/
-│       └── application-prod.yml    # 生产配置模板，部署前手动填写密码
-├── frontend/
-│   ├── Dockerfile                  # 仅用于构建并导出 dist
-│   └── .dockerignore
-├── nginx/
-│   └── default.conf                # 独立 Nginx 配置参考模板
-└── DEPLOY.md
+```bash
+git pull
+cd docker
+chmod +x deploy-remote.sh
+./deploy-remote.sh
 ```
 
-## 3. 影响范围分析
+这条命令会同时做两件事：
 
-### 原代码设计意图
-- 前端通过 `queue-system-frontend/src/api/index.ts:4` 和 `queue-system-frontend/src/api/counter.js:3` 访问 `/api/v1`
-- 开发环境由 `queue-system-frontend/vite.config.js:37` 代理 `/api` 到本地后端
-- 后端通过挂载的 `docker/backend/config/application-prod.yml` 读取生产配置
-- 后端 `app.ip` 与 `app.frontend.port` 会影响二维码、回显地址与 CORS
+1. 重建并重启后端容器
+2. 构建前端 `dist` 并直接发布到 Nginx 静态目录
 
-### 本次直接影响
-- `docker/docker-compose.standalone.yml`
-- `docker/build-and-up.sh`
-- `docker/push-image.sh`
-- `docker/frontend/Dockerfile`
-- `docker/DEPLOY.md`
+这就是最符合你当前环境、同时调整最少的部署链路。
 
-### 间接影响
-- 前端发布流程改为单独构建 `dist/` 并同步到独立 Nginx 目录
-- 后端通过宿主机 `8080` 端口提供 API，供独立 Nginx 反向代理
-- Docker 不再承载前端运行时 Nginx
+## 为什么原来的流程不够省事
 
-### 风险等级
-- 中风险
+- `build-and-up.sh` 只处理后端
+- 前端发布还需要手工构建和手工同步 `dist`
+- `push-image.sh` 适合“本地构建推镜像仓库”，但不适合“服务器已同步源码后原地更新”
+- `docker/nginx/default.conf` 原先示例把 `/api` 代理到 `queue-backend:8080`，这要求 Nginx 和后端在同一个 Docker 网络里；如果你的 Nginx 是独立部署，这个示例并不稳妥
 
-### 风险说明
-1. `host.docker.internal` 依赖 `extra_hosts: host-gateway`，要求目标 Docker 版本支持该特性
-2. 若现有 MySQL/Redis 未映射到宿主机 `3306/6379`，后端将无法连接
-3. 若未填写 `application-prod.yml` 中的密码和 JWT 密钥，后端会启动失败或登录鉴权异常
-4. 独立 Nginx 的 `/api` 代理目标必须改成服务器实际可访问的后端地址，不能继续照搬容器内主机名
+## 一次性配置
 
-## 4. 配置步骤
+### 1. 复制环境文件
 
-### 4.1 修改后端生产配置
-
-编辑 `docker/backend/config/application-prod.yml`，至少填写以下字段：
-
-```yaml
-spring:
-  datasource:
-    password: 你的MySQLRoot密码
-  data:
-    redis:
-      password: 你的Redis密码
-
-jwt:
-  secret: 你自己的JWT密钥_至少32位
+```bash
+cd docker
+cp .env.remote.example .env
 ```
 
-如宿主机端口不是默认值，还要同步修改：
+至少填写这些字段：
 
-```yaml
-spring:
-  datasource:
-    url: jdbc:mysql://host.docker.internal:3306/queue_system...
-  data:
-    redis:
-      host: host.docker.internal
-      port: 6379
+```dotenv
+APP_PUBLIC_HOST=你的域名或公网IP
+DB_PASSWORD=你的MySQL密码
+REDIS_PASSWORD=你的Redis密码
+JWT_SECRET=你自己的JWT密钥，至少32位
+FRONTEND_DIST_DIR=/data/www/queue-system
 ```
 
-### 4.2 检查独立 Nginx 配置
+默认情况下，后端会通过：
 
-前端线上访问依赖独立 Nginx，最少需要满足：
+- `host.docker.internal:3306` 连接 MySQL
+- `host.docker.internal:6379` 连接 Redis
 
-- `root` 指向前端 `dist/` 目录
-- `/` 使用 `try_files $uri $uri/ /index.html`
-- `/api/` 代理到后端，例如 `http://127.0.0.1:8080/api/`
+这要求你现有的 MySQL/Redis 容器已经映射到宿主机端口。
 
-可参考 `docker/nginx/default.conf`，但需要按你的线上环境改成真实地址。
+如果你线上不是这个端口，直接在 `.env` 改：
+
+```dotenv
+DB_HOST=host.docker.internal
+DB_PORT=3306
+REDIS_HOST=host.docker.internal
+REDIS_PORT=6379
+```
+
+如果你的 MySQL、Redis 也和后端处于同一个 Docker 网络，更推荐直接把 `.env` 改成容器名：
+
+```dotenv
+DB_HOST=mysql
+REDIS_HOST=redis
+```
+
+### 2. 配置 Nginx
+
+参考 `docker/nginx/default.conf`。核心点只有两个：
+
+1. `root` 指向 `FRONTEND_DIST_DIR`
+2. `/api/` 代理到 Docker 网络里的 `queue-backend:8080`
+
+因为你的 Nginx 本身也是 Docker 容器，最稳妥的做法不是代理 `127.0.0.1`，而是把 Nginx 容器接到同一个共享网络。
+
+本仓库里的后端 Compose 网络名已经固定为 `queue-shared`，可通过 `docker/.env` 的 `BACKEND_NETWORK_NAME` 调整。
+
+如果你的 Nginx 容器还没接入这个网络，一次性执行：
+
+```bash
+docker network connect queue-shared <你的-nginx-容器名>
+```
 
 示例：
 
 ```nginx
 server {
     listen 80;
-    server_name 43.155.249.87 zxmeng.asia www.zxmeng.asia;
+    server_name your-domain.com;
 
     root /data/www/queue-system;
     index index.html;
 
     location /api/ {
-        proxy_pass http://127.0.0.1:8080/api/;
+        proxy_pass http://queue-backend:8080/api/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -133,191 +113,55 @@ server {
 }
 ```
 
-## 5. 云服务器部署后端
+如果你的 Nginx 容器需要 reload，可以在 `docker/.env` 里填：
 
-### 5.1 构建并启动 backend
+```dotenv
+NGINX_CONTAINER_NAME=你的nginx容器名
+```
+
+这样 `./deploy-remote.sh` 在发布前端后会顺手 reload Nginx。
+
+## 日常发布
+
+以后每次源码同步到服务器后，只需要：
 
 ```bash
+git pull
 cd docker
-chmod +x build-and-up.sh
-./build-and-up.sh v1.0.3
+./deploy-remote.sh
 ```
 
-或自动生成时间戳 tag：
+如果你只想更新后端：
 
 ```bash
-cd docker
-chmod +x build-and-up.sh
-./build-and-up.sh
+./deploy-remote.sh backend
 ```
 
-这会构建并启动：
-
-- `queue-backend:<IMAGE_TAG>`
-
-### 5.2 查看状态
+如果你只想更新前端：
 
 ```bash
-docker compose -f docker-compose.standalone.yml ps
+./deploy-remote.sh frontend
 ```
 
-预期看到：
+## 当前文件职责
 
-```text
-queue-backend    Up
-```
-
-### 5.3 查看日志
-
-```bash
-docker compose -f docker-compose.standalone.yml logs -f backend
-```
-
-## 6. 构建并发布前端 dist
-
-### 6.1 直接本机构建
-
-```bash
-cd queue-system-frontend
-npm ci
-npm run build
-```
-
-构建产物位于：
-
-```text
-queue-system-frontend/dist/
-```
-
-将其同步到独立 Nginx 站点目录，例如：
-
-```bash
-rsync -av --delete queue-system-frontend/dist/ /data/www/queue-system/
-```
-
-### 6.2 使用 Docker 导出 dist
-
-前端 `docker/frontend/Dockerfile` 现在只负责构建并导出 `dist`，不再内置 Nginx。
-
-```bash
-docker build -f docker/frontend/Dockerfile -t queue-frontend-dist queue-system-frontend
-docker run --rm -v "$(pwd)/frontend-dist:/output" queue-frontend-dist
-```
-
-导出的静态文件位于：
-
-```text
-./frontend-dist/
-```
-
-然后再同步到独立 Nginx 站点目录。
-
-## 7. 本地打包并推送到远端 Registry
-
-### 7.1 前置条件
-
-1. 本地有 Docker 环境
-2. 已登录远端 Registry：
-
-```bash
-docker login <registry地址>
-```
-
-### 7.2 推送 backend 镜像
-
-```bash
-cd docker
-chmod +x push-image.sh
-
-# 手动指定版本号
-./push-image.sh 43.155.249.87:5000 v1.0.3
-
-# 不传版本号，自动使用时间戳
-./push-image.sh 43.155.249.87:5000
-```
-
-脚本执行流程：
-
-1. 检查 Registry 登录状态
-2. 本地构建 backend 镜像
-3. 为镜像打上远端 tag
-4. 推送到远端 Registry
-
-### 7.3 服务器端拉取并启动 backend
-
-在目标服务器上执行：
-
-```bash
-docker pull 43.155.249.87:5000/queue-backend:v1.0.3
-docker tag 43.155.249.87:5000/queue-backend:v1.0.3 queue-backend:v1.0.3
-IMAGE_TAG=v1.0.3 docker compose -f docker-compose.standalone.yml up -d backend
-```
-
-> 注意：如果 Registry 使用 HTTP（非 HTTPS），需要在服务器上配置 Docker 的 `insecure-registries`。
-
-## 8. 验证方法
-
-### 8.1 前端访问验证
-
-浏览器打开：
-
-```text
-https://zxmeng.asia/
-```
-
-应能正常打开前端页面，并且刷新非首页路由不应返回 404。
-
-### 8.2 API 代理验证
-
-在浏览器开发者工具中检查前端请求：
-
-- 请求路径应为 `/api/v1/...`
-- 由独立 Nginx 转发到 `127.0.0.1:8080` 或你的实际后端地址
-- 不应出现跨域错误
-
-### 8.3 后端连接验证
-
-检查后端日志确认：
-
-- 成功连接 MySQL
-- 成功连接 Redis
-- 生产配置已生效
-
-## 9. 常用命令
-
-```bash
-# 自动生成时间戳 tag 后重建并启动 backend
-./build-and-up.sh
-
-# 手动指定 tag 后重建并启动 backend
-./build-and-up.sh v1.0.3
-
-# 本地打包并推送 backend 到远端 Registry
-./push-image.sh 43.155.249.87:5000 v1.0.3
-
-# 查看 backend 日志
-docker compose -f docker-compose.standalone.yml logs -f backend
-
-# 停止 backend
-docker compose -f docker-compose.standalone.yml down
-
-# Docker 构建并导出前端 dist
-docker build -f docker/frontend/Dockerfile -t queue-frontend-dist queue-system-frontend
-docker run --rm -v "$(pwd)/frontend-dist:/output" queue-frontend-dist
-```
-
-## 10. 推荐部署策略结论
-
-推荐直接使用：
-
-- `docker/docker-compose.standalone.yml`
+- `docker/deploy-remote.sh`
+  远端一键部署入口，推荐使用
 - `docker/build-and-up.sh`
-- `docker/push-image.sh`
+  仅重建后端，保留给 backend-only 场景
+- `docker/docker-compose.standalone.yml`
+  后端容器编排
 - `docker/backend/config/application-prod.yml`
+  生产配置模板，现已支持从环境变量读取
+- `docker/nginx/default.conf`
+  独立 Nginx 反向代理与静态站点模板
 
-原因：
+## 可选方案：镜像仓库发布
 
-1. 最符合你现在的线上环境：MySQL、Redis、Nginx 已独立存在，不重复编排
-2. Docker 只负责后端，职责清晰，发布链路更简单
-3. 前端继续保持 `/api/v1` 相对路径调用方式，不需要额外改代码
-4. 独立 Nginx 统一处理静态资源、路由回退和 `/api` 反向代理
+如果你未来不想在服务器上构建，只想在本地或 CI 构建镜像后推送，再让服务器拉取，那么可以继续使用 `push-image.sh`。
+
+但对你当前“服务器已同步源码，想快速更新”的需求，这不是最省事的路径。当前更推荐：
+
+```bash
+git pull && cd docker && ./deploy-remote.sh
+```

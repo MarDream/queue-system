@@ -41,14 +41,8 @@ echo "[queue-system] 镜像 tag       : $IMAGE_TAG"
 echo "============================================"
 
 echo ""
-echo "[1/4] 检查 Registry 登录状态..."
-if ! docker login "$REGISTRY" --get-login 2>/dev/null; then
-  echo ""
-  echo "未登录到 $REGISTRY，请先执行："
-  echo "  docker login $REGISTRY"
-  echo ""
-  exit 1
-fi
+echo "[1/4] 检查 Docker 可用性..."
+docker info >/dev/null
 
 echo ""
 echo "[2/4] 本地构建后端镜像 (IMAGE_TAG=$IMAGE_TAG)..."
@@ -61,7 +55,13 @@ docker tag "queue-backend:${IMAGE_TAG}" "$BACKEND_REMOTE"
 echo ""
 echo "[4/4] 推送后端镜像到 $REGISTRY ..."
 echo "  -> $BACKEND_REMOTE"
-docker push "$BACKEND_REMOTE"
+if ! docker push "$BACKEND_REMOTE"; then
+  echo ""
+  echo "推送失败，请确认已执行："
+  echo "  docker login $REGISTRY"
+  echo ""
+  exit 1
+fi
 
 echo ""
 echo "============================================"
