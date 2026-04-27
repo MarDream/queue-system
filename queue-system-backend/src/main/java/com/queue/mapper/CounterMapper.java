@@ -5,7 +5,6 @@ import com.queue.entity.Counter;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
-import org.apache.ibatis.annotations.Select;
 
 @Mapper
 public interface CounterMapper extends BaseMapper<Counter> {

@@ -2,7 +2,6 @@ package com.queue.service;
 
 import com.queue.dto.RegionBusinessDTO;
 import com.queue.entity.BusinessType;
-import com.queue.entity.RegionBusiness;
 
 import java.util.List;
 

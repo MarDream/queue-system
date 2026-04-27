@@ -99,7 +99,7 @@
         <div class="ai-chat">
           <div v-if="messages.length === 0" class="ai-empty">
             <div v-if="props.workspace === 'counter' && !props.counterId">请先选择窗口</div>
-            <div v-else>支持示例：当前等待人数；今日取号量；昨日办结量；近7天过号量；今日取号明细</div>
+            <div v-else>支持示例：当前等待人数；今日取号量；昨日办结量；近7天过号量；近30天取号趋势；本月办结量；上周过号排名；今日取号明细</div>
           </div>
           <div v-else class="ai-msg-list">
             <div v-for="m in messages" :key="m.id" :class="['ai-msg', m.role]">

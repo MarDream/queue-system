@@ -9,7 +9,6 @@ import com.queue.entity.SysMenu;
 import com.queue.entity.SysUser;
 import com.queue.mapper.SysButtonMapper;
 import com.queue.mapper.SysPermissionMapper;
-import com.queue.mapper.SysRoleMenuMapper;
 import com.queue.mapper.SysUserMapper;
 import com.queue.mapper.SysUserMenuMapper;
 import com.queue.service.SysMenuService;

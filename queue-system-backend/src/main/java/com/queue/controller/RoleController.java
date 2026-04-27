@@ -6,11 +6,8 @@ import com.queue.common.ResultCode;
 import com.queue.dto.SysRoleDTO;
 import com.queue.entity.SysMenu;
 import com.queue.entity.SysRole;
-import com.queue.entity.SysUser;
 import com.queue.mapper.SysRoleButtonMapper;
 import com.queue.mapper.SysRoleMenuMapper;
-import com.queue.mapper.SysUserMapper;
-import com.queue.mapper.SysRoleMapper;
 import com.queue.service.SysMenuService;
 import com.queue.service.SysRoleService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -27,7 +24,6 @@ import java.util.Map;
 public class RoleController {
 
     private final SysRoleService sysRoleService;
-    private final SysRoleMapper sysRoleMapper;
     private final SysRoleMenuMapper sysRoleMenuMapper;
     private final SysRoleButtonMapper sysRoleButtonMapper;
     private final SysMenuService sysMenuService;

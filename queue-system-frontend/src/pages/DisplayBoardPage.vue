@@ -246,7 +246,6 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.header-left {}
 .region-name {
   font-size: 22px;
   font-weight: 700;

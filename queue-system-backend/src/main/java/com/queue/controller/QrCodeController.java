@@ -9,7 +9,6 @@ import com.queue.common.Result;
 import com.queue.entity.QrCodeRecord;
 import com.queue.entity.Region;
 import com.queue.entity.SysUser;
-import com.queue.mapper.RegionMapper;
 import com.queue.mapper.SysUserMapper;
 import com.queue.service.QrCodeRecordService;
 import com.queue.config.ServerConfig;
@@ -35,7 +34,6 @@ public class QrCodeController {
     private final RegionService regionService;
     private final QrCodeRecordService qrCodeRecordService;
     private final SysUserMapper sysUserMapper;
-    private final RegionMapper regionMapper;
     private final ServerConfig serverConfig;
 
     @GetMapping(value = "/generate", produces = MediaType.IMAGE_PNG_VALUE)

@@ -91,6 +91,9 @@ public class SysUserServiceImpl implements SysUserService {
             if (user.getStatus() != null && user.getStatus() == USER_STATUS_PENDING) {
                 throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "账号待激活");
             }
+            if (user.getStatus() != null && user.getStatus() == USER_STATUS_DISABLED) {
+                throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "账号已被禁用");
+            }
             throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "账号已被禁用");
         }
 

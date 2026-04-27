@@ -4,7 +4,6 @@ import com.queue.common.Result;
 import com.queue.dto.CounterCallResponse;
 import com.queue.dto.CounterOperationRequest;
 import com.queue.service.CounterService;
-import com.queue.service.QueueService;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;

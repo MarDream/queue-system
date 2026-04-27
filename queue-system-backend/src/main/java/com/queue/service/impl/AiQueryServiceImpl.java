@@ -38,6 +38,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -168,10 +170,19 @@ public class AiQueryServiceImpl implements AiQueryService {
             return null;
         }
         Object v = redisTemplate.opsForValue().get(lastKey(user.getId(), ws, sessionId));
-        if (v instanceof Map) {
-            return (Map<String, Object>) v;
+        return toStringObjectMap(v);
+    }
+
+    private Map<String, Object> toStringObjectMap(Object v) {
+        if (!(v instanceof Map<?, ?> raw)) {
+            return null;
         }
-        return null;
+        Map<String, Object> out = new HashMap<>();
+        for (Map.Entry<?, ?> e : raw.entrySet()) {
+            if (e.getKey() == null) continue;
+            out.put(String.valueOf(e.getKey()), e.getValue());
+        }
+        return out;
     }
 
     private AiAskResponse.AiCard card(String title, String value, String unit) {
@@ -245,20 +256,99 @@ public class AiQueryServiceImpl implements AiQueryService {
         }
     }
 
+    private static final Pattern RANGE_WORD = Pattern.compile("([近本上]\\s*\\d+\\s*天|近\\d+天|最近\\d+天)|(\\d{4}-\\d{2}-\\d{2})\\s*[~到至]\\s*(\\d{4}-\\d{2}-\\d{2})|(\\d{4}年\\d{1,2}月\\d{1,2}日)\\s*[~到至]\\s*(\\d{4}年\\d{1,2}月\\d{1,2}日)|(\\d{1,2}月\\d{1,2}日?)\\s*[~到至]\\s*(\\d{1,2}月\\d{1,2}日?)|(\\d{4}-\\d{2}-\\d{2})");
+    private static final Pattern RANGE_N_DAYS = Pattern.compile("(?:近|最近|过去)\\s*(\\d+)\\s*天");
+
     private TimeRange resolveTimeRange(String q) {
         LocalDate today = LocalDate.now();
         if (containsAny(q, "昨天", "昨日")) {
             LocalDate d = today.minusDays(1);
             return new TimeRange("昨日", d.atStartOfDay(), d.plusDays(1).atStartOfDay());
         }
-        if (containsAny(q, "近7天", "最近7天")) {
-            LocalDate start = today.minusDays(6);
-            return new TimeRange("近7天", start.atStartOfDay(), today.plusDays(1).atStartOfDay());
-        }
         if (containsAny(q, "今天", "今日")) {
             return new TimeRange("今日", today.atStartOfDay(), today.plusDays(1).atStartOfDay());
         }
+        if (containsAny(q, "本周", "这周")) {
+            LocalDate mon = today.with(java.time.DayOfWeek.MONDAY);
+            return new TimeRange("本周", mon.atStartOfDay(), today.plusDays(1).atStartOfDay());
+        }
+        if (containsAny(q, "上周")) {
+            LocalDate lastMon = today.minusWeeks(1).with(java.time.DayOfWeek.MONDAY);
+            LocalDate lastSun = lastMon.plusDays(7);
+            return new TimeRange("上周", lastMon.atStartOfDay(), lastSun.atStartOfDay());
+        }
+        if (containsAny(q, "本月")) {
+            LocalDate first = today.withDayOfMonth(1);
+            return new TimeRange("本月", first.atStartOfDay(), today.plusDays(1).atStartOfDay());
+        }
+        if (containsAny(q, "上月")) {
+            LocalDate first = today.minusMonths(1).withDayOfMonth(1);
+            LocalDate nextFirst = today.withDayOfMonth(1);
+            return new TimeRange("上月", first.atStartOfDay(), nextFirst.atStartOfDay());
+        }
+
+        Matcher mDays = RANGE_N_DAYS.matcher(q);
+        if (mDays.find()) {
+            int n = Integer.parseInt(mDays.group(1));
+            LocalDate start = today.minusDays(n - 1);
+            return new TimeRange("近" + n + "天", start.atStartOfDay(), today.plusDays(1).atStartOfDay());
+        }
+
+        Matcher mRange = RANGE_WORD.matcher(q);
+        if (mRange.find()) {
+            if (mRange.group(2) != null && mRange.group(3) != null) {
+                return parseDateRange(mRange.group(2), mRange.group(3), "yyyy-MM-dd");
+            }
+            if (mRange.group(4) != null && mRange.group(5) != null) {
+                return parseDateRange(mRange.group(4), mRange.group(5), "yyyy年M月d日");
+            }
+            if (mRange.group(6) != null && mRange.group(7) != null) {
+                int thisYear = today.getYear();
+                return parseDateRange(mRange.group(6), mRange.group(7), "M月d", "M月d日", thisYear);
+            }
+            if (mRange.group(8) != null) {
+                LocalDate d = parseSingleDate(mRange.group(8));
+                if (d != null) {
+                    return new TimeRange(d.format(DateTimeFormatter.ISO_LOCAL_DATE), d.atStartOfDay(), d.plusDays(1).atStartOfDay());
+                }
+            }
+        }
+
         return new TimeRange("今日", today.atStartOfDay(), today.plusDays(1).atStartOfDay());
+    }
+
+    private TimeRange parseDateRange(String rawStart, String rawEnd, String fmt) {
+        return parseDateRange(rawStart, rawEnd, fmt, fmt, null);
+    }
+
+    private TimeRange parseDateRange(String rawStart, String rawEnd, String fmt1, String fmt2, Integer fallbackYear) {
+        try {
+            DateTimeFormatter f1 = DateTimeFormatter.ofPattern(fmt1);
+            DateTimeFormatter f2 = DateTimeFormatter.ofPattern(fmt2);
+            LocalDate start = LocalDate.parse(rawStart.trim(), f1);
+            LocalDate end = LocalDate.parse(rawEnd.trim(), f2);
+            if (fallbackYear != null) {
+                start = start.withYear(fallbackYear);
+                end = end.withYear(fallbackYear);
+            }
+            if (end.isBefore(start)) {
+                LocalDate tmp = start;
+                start = end;
+                end = tmp;
+            }
+            String label = rawStart.trim() + "~" + rawEnd.trim();
+            return new TimeRange(label, start.atStartOfDay(), end.plusDays(1).atStartOfDay());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private LocalDate parseSingleDate(String raw) {
+        try {
+            return LocalDate.parse(raw.trim(), DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private boolean containsAny(String s, String... tokens) {
@@ -269,14 +359,12 @@ public class AiQueryServiceImpl implements AiQueryService {
     }
 
     private static class QueryScope {
-        private final String workspace;
         private final Long regionId;
         private final Long counterId;
         private final List<Long> businessTypeIds;
         private final boolean counterBound;
 
-        private QueryScope(String workspace, Long regionId, Long counterId, List<Long> businessTypeIds, boolean counterBound) {
-            this.workspace = workspace;
+        private QueryScope(Long regionId, Long counterId, List<Long> businessTypeIds, boolean counterBound) {
             this.regionId = regionId;
             this.counterId = counterId;
             this.businessTypeIds = businessTypeIds;
@@ -620,7 +708,7 @@ public class AiQueryServiceImpl implements AiQueryService {
     private QueryScope resolveScope(SysUser user, String workspace, AiAskRequest req) {
         if ("admin".equals(workspace)) {
             Long rid = resolveAdminRegionId(user, req == null ? null : req.getRegionId());
-            return new QueryScope(workspace, rid, null, req.getBusinessTypeId() == null ? null : List.of(req.getBusinessTypeId()), false);
+            return new QueryScope(rid, null, req.getBusinessTypeId() == null ? null : List.of(req.getBusinessTypeId()), false);
         }
         validateWorkspacePermission(user, workspace, req);
         Counter counter = counterMapper.selectById(req.getCounterId());
@@ -635,7 +723,7 @@ public class AiQueryServiceImpl implements AiQueryService {
             }
             bizIds = List.of(req.getBusinessTypeId());
         }
-        return new QueryScope(workspace, counter.getRegionId(), counter.getId(), bizIds, true);
+        return new QueryScope(counter.getRegionId(), counter.getId(), bizIds, true);
     }
 
     private Long resolveAdminRegionId(SysUser user, Long requestedRegionId) {
