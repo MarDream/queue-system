@@ -20,6 +20,25 @@ spring:
       password: ${REDIS_PASSWORD:}
       database: 0
 
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:465}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    protocol: ${MAIL_PROTOCOL:smtp}
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          auth: ${MAIL_SMTP_AUTH:true}
+          ssl:
+            enable: ${MAIL_SMTP_SSL_ENABLE:true}
+          starttls:
+            enable: ${MAIL_SMTP_STARTTLS_ENABLE:false}
+          socketFactory:
+            class: ${MAIL_SMTP_SOCKET_FACTORY_CLASS:javax.net.ssl.SSLSocketFactory}
+            port: ${MAIL_SMTP_SOCKET_FACTORY_PORT:465}
+
   jackson:
     default-property-inclusion: non_null
     date-format: yyyy-MM-dd HH:mm:ss
@@ -54,6 +73,7 @@ app:
   ip: ${APP_PUBLIC_HOST:43.155.249.87}
   frontend:
     port: ${APP_FRONTEND_PORT:80}
+    base-url: ${APP_FRONTEND_BASE_URL:}
   cors:
     extra-origins: ${APP_CORS_EXTRA_ORIGINS:}
 

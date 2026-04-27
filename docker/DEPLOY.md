@@ -22,12 +22,12 @@ chmod +x deploy-remote.sh
 
 这就是最符合你当前环境、同时调整最少的部署链路。
 
-## 为什么原来的流程不够省事
+## 为什么现在这样最省事
 
-- `build-and-up.sh` 只处理后端
-- 前端发布还需要手工构建和手工同步 `dist`
-- `push-image.sh` 适合“本地构建推镜像仓库”，但不适合“服务器已同步源码后原地更新”
-- `docker/nginx/default.conf` 原先示例把 `/api` 代理到 `queue-backend:8080`，这要求 Nginx 和后端在同一个 Docker 网络里；如果你的 Nginx 是独立部署，这个示例并不稳妥
+- 前后端都收敛到 `deploy-remote.sh`
+- 前端发布不再需要手工构建和手工同步 `dist`
+- 远端源码更新后只保留一条部署入口
+- `docker/nginx/default.conf` 继续作为模板文件保留
 
 ## 一次性配置
 
@@ -42,11 +42,17 @@ cp .env.remote.example .env
 
 ```dotenv
 APP_PUBLIC_HOST=你的域名或公网IP
+APP_FRONTEND_BASE_URL=https://你的域名
 DB_PASSWORD=你的MySQL密码
 REDIS_PASSWORD=你的Redis密码
+MAIL_HOST=你的SMTP地址
+MAIL_USERNAME=你的发件邮箱
+MAIL_PASSWORD=你的邮箱授权码
 JWT_SECRET=你自己的JWT密钥，至少32位
 FRONTEND_DIST_DIR=/data/www/queue-system
 ```
+
+如果线上最终通过 HTTPS 域名访问，优先配置 `APP_FRONTEND_BASE_URL`，不要只依赖 `APP_PUBLIC_HOST + APP_FRONTEND_PORT`。这样后端生成的跳转地址、二维码地址、重置密码链接都会直接使用正式域名。
 
 默认情况下，后端会通过：
 
@@ -81,6 +87,12 @@ REDIS_HOST=redis
 因为你的 Nginx 本身也是 Docker 容器，最稳妥的做法不是代理 `127.0.0.1`，而是把 Nginx 容器接到同一个共享网络。
 
 本仓库里的后端 Compose 网络名已经固定为 `queue-shared`，可通过 `docker/.env` 的 `BACKEND_NETWORK_NAME` 调整。
+
+如果这个网络本来就是你服务器上已经存在的共享网络，还要在 `.env` 里额外设置：
+
+```dotenv
+BACKEND_NETWORK_EXTERNAL=true
+```
 
 如果你的 Nginx 容器还没接入这个网络，一次性执行：
 
@@ -146,9 +158,7 @@ cd docker
 ## 当前文件职责
 
 - `docker/deploy-remote.sh`
-  远端一键部署入口，推荐使用
-- `docker/build-and-up.sh`
-  仅重建后端，保留给 backend-only 场景
+  远端一键部署入口，支持 `all/backend/frontend`
 - `docker/docker-compose.standalone.yml`
   后端容器编排
 - `docker/backend/config/application-prod.yml`
@@ -156,11 +166,7 @@ cd docker
 - `docker/nginx/default.conf`
   独立 Nginx 反向代理与静态站点模板
 
-## 可选方案：镜像仓库发布
-
-如果你未来不想在服务器上构建，只想在本地或 CI 构建镜像后推送，再让服务器拉取，那么可以继续使用 `push-image.sh`。
-
-但对你当前“服务器已同步源码，想快速更新”的需求，这不是最省事的路径。当前更推荐：
+对你当前“服务器已同步源码，想快速更新”的需求，推荐始终使用：
 
 ```bash
 git pull && cd docker && ./deploy-remote.sh

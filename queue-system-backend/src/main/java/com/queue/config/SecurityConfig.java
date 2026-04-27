@@ -16,7 +16,12 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.net.URI;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 @Configuration
 @EnableWebSecurity
@@ -60,12 +65,17 @@ public class SecurityConfig {
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
-        String ip = ServerConfig.getLocalIp();
-        java.util.List<String> patterns = new java.util.ArrayList<>(Arrays.asList(
+        String host = ServerConfig.getLocalIp();
+        Set<String> patterns = new LinkedHashSet<>(Arrays.asList(
             "http://localhost:*",
+            "https://localhost:*",
             "http://127.0.0.1:*",
-            "http://" + ip + ":*"
+            "https://127.0.0.1:*"
         ));
+
+        addHostPatterns(patterns, host);
+        addFrontendBaseUrlPattern(patterns, serverConfig.getFrontendBaseUrl());
+
         // 从配置读取额外的 CORS 允许源
         String extra = serverConfig.getExtraCorsOrigins();
         if (extra != null && !extra.isBlank()) {
@@ -77,8 +87,8 @@ public class SecurityConfig {
             }
         }
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(patterns);
-        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedOriginPatterns(new ArrayList<>(patterns));
+        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"));
         configuration.setAllowedHeaders(Arrays.asList("*"));
         configuration.setAllowCredentials(true);
 
@@ -90,5 +100,35 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    private void addHostPatterns(Set<String> patterns, String host) {
+        if (host == null || host.isBlank()) {
+            return;
+        }
+        String trimmed = host.trim();
+        patterns.add("http://" + trimmed);
+        patterns.add("https://" + trimmed);
+        patterns.add("http://" + trimmed + ":*");
+        patterns.add("https://" + trimmed + ":*");
+    }
+
+    private void addFrontendBaseUrlPattern(Set<String> patterns, String frontendBaseUrl) {
+        if (frontendBaseUrl == null || frontendBaseUrl.isBlank()) {
+            return;
+        }
+        try {
+            URI uri = URI.create(frontendBaseUrl.trim());
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            int port = uri.getPort();
+            if (scheme == null || host == null) {
+                return;
+            }
+            String origin = port > 0 ? scheme + "://" + host + ":" + port : scheme + "://" + host;
+            patterns.add(origin);
+        } catch (IllegalArgumentException ignored) {
+            // Ignore invalid custom frontend URL; extra origins can still be used as fallback.
+        }
     }
 }

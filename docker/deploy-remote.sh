@@ -18,6 +18,21 @@ COMPOSE_FILE="$SCRIPT_DIR/docker-compose.standalone.yml"
 ENV_FILE="$SCRIPT_DIR/.env"
 FRONTEND_IMAGE="queue-frontend-dist:latest"
 
+compose_cmd() {
+  if docker compose version >/dev/null 2>&1; then
+    docker compose "$@"
+    return
+  fi
+
+  if command -v docker-compose >/dev/null 2>&1; then
+    docker-compose "$@"
+    return
+  fi
+
+  echo "ERROR: Neither 'docker compose' nor 'docker-compose' is available."
+  exit 1
+}
+
 if [ ! -f "$ENV_FILE" ]; then
   echo "ERROR: Env file not found: $ENV_FILE"
   echo "Copy docker/.env.remote.example to docker/.env and fill in production values first."
@@ -30,7 +45,7 @@ set +a
 
 deploy_backend() {
   echo "[backend] Rebuilding and restarting backend container..."
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build backend
+  compose_cmd -f "$COMPOSE_FILE" up -d --build backend
 }
 
 deploy_frontend() {
@@ -45,17 +60,13 @@ deploy_frontend() {
   fi
 
   local parent_dir
-  local target_name
   local staging_dir
-  local backup_dir
 
   parent_dir="$(dirname "$FRONTEND_DIST_DIR")"
-  target_name="$(basename "$FRONTEND_DIST_DIR")"
-  staging_dir="$parent_dir/.${target_name}.staging.$$"
-  backup_dir="$parent_dir/.${target_name}.backup.$$"
+  staging_dir="$parent_dir/.frontend-dist.staging.$$"
 
   mkdir -p "$parent_dir"
-  rm -rf "$staging_dir" "$backup_dir"
+  rm -rf "$staging_dir"
   mkdir -p "$staging_dir"
 
   echo "[frontend] Building dist image..."
@@ -64,12 +75,10 @@ deploy_frontend() {
   echo "[frontend] Exporting dist to staging directory..."
   docker run --rm -v "$staging_dir:/output" "$FRONTEND_IMAGE" >/dev/null
 
-  if [ -d "$FRONTEND_DIST_DIR" ]; then
-    mv "$FRONTEND_DIST_DIR" "$backup_dir"
-  fi
-
-  mv "$staging_dir" "$FRONTEND_DIST_DIR"
-  rm -rf "$backup_dir"
+  mkdir -p "$FRONTEND_DIST_DIR"
+  find "$FRONTEND_DIST_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+  cp -a "$staging_dir"/. "$FRONTEND_DIST_DIR"/
+  rm -rf "$staging_dir"
 
   if [ -n "${NGINX_CONTAINER_NAME:-}" ]; then
     echo "[frontend] Reloading nginx container: $NGINX_CONTAINER_NAME"
