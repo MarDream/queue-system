@@ -625,7 +625,11 @@ async function handleDelete(row) {
     await request.delete(`/regions/${row.id}`)
     ElMessage.success('删除成功')
     await fetchData()
-  } catch {}
+  } catch (err) {
+    if (err !== 'cancel') {
+      ElMessage.error(err?.message || '删除失败')
+    }
+  }
 }
 
 // 业务类型关联

@@ -117,7 +117,7 @@ public class RegionServiceImpl implements RegionService {
         // 检查是否有子区域
         List<Region> children = listByParentId(id);
         if (!children.isEmpty()) {
-            throw new BusinessException(ResultCode.SYSTEM_ERROR);
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "当前区域下存在下级区域，请先删除下级区域");
         }
         // 级联删除该区域的二维码记录
         qrCodeRecordService.deleteByRegionIds(List.of(id));

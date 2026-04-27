@@ -87,12 +87,10 @@ public class SysUserServiceImpl implements SysUserService {
             throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "用户名或密码错误");
         }
 
-        if (user.getStatus() == null || user.getStatus() != USER_STATUS_ACTIVE) {
-            if (user.getStatus() != null && user.getStatus() == USER_STATUS_PENDING) {
+        Integer status = user.getStatus();
+        if (status == null || status != USER_STATUS_ACTIVE) {
+            if (status != null && status == USER_STATUS_PENDING) {
                 throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "账号待激活");
-            }
-            if (user.getStatus() != null && user.getStatus() == USER_STATUS_DISABLED) {
-                throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "账号已被禁用");
             }
             throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "账号已被禁用");
         }
