@@ -11,6 +11,7 @@ import com.queue.mapper.SysButtonMapper;
 import com.queue.mapper.SysPermissionMapper;
 import com.queue.mapper.SysUserMapper;
 import com.queue.mapper.SysUserMenuMapper;
+import com.queue.service.AuthContextService;
 import com.queue.service.SysMenuService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -31,20 +32,21 @@ public class SysMenuController {
     private final SysButtonMapper sysButtonMapper;
     private final SysPermissionMapper sysPermissionMapper;
     private final SysUserMenuMapper sysUserMenuMapper;
+    private final AuthContextService authContextService;
 
     @GetMapping
-    public Result<List<SysMenu>> list(@RequestParam(required = false) Long userId) {
+    public Result<List<SysMenu>> list(HttpServletRequest req) {
         List<SysMenu> allMenus = sysMenuService.listAll();
-        if (userId == null || userId <= 0) {
+        SysUser currentUser = authContextService.getCurrentUser(req);
+        if (currentUser == null) {
             return Result.ok(allMenus); // 不过滤（菜单管理页面）
         }
         // 按用户权限过滤
-        SysUser user = sysUserMapper.selectById(userId);
-        if (user == null || "SUPER_ADMIN".equals(user.getRole())) {
+        if ("SUPER_ADMIN".equals(currentUser.getRole())) {
             return Result.ok(allMenus);
         }
         // 获取用户有权限的菜单ID
-        List<Long> menuIds = getMenuIdsForUser(userId, user.getRole());
+        List<Long> menuIds = getMenuIdsForUser(currentUser.getId(), currentUser.getRole());
         if (menuIds.isEmpty()) {
             return Result.ok(List.of());
         }
@@ -98,7 +100,12 @@ public class SysMenuController {
 
     // 更新菜单的父级（拖拽为子菜单）
     @PutMapping("/{id}/parent")
-    public Result<Void> updateParent(@PathVariable Long id, @RequestBody Map<String, Long> body) {
+    public Result<Void> updateParent(@PathVariable Long id, @RequestBody Map<String, Long> body, HttpServletRequest req) {
+        Long operatorId = (Long) req.getAttribute("userId");
+        SysUser operator = sysUserMapper.selectById(operatorId);
+        if (operator == null || !"SUPER_ADMIN".equals(operator.getRole())) {
+            throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "仅超级管理员可调整菜单层级");
+        }
         Long parentId = body.get("parentId");
         sysMenuService.updateMenuParent(id, parentId);
         return Result.ok();

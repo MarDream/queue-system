@@ -22,6 +22,7 @@ import com.queue.mapper.CounterMapper;
 import com.queue.mapper.RegionBusinessMapper;
 import com.queue.mapper.RegionMapper;
 import com.queue.mapper.TicketMapper;
+import com.queue.service.PhoneCryptoService;
 import com.queue.service.QueueService;
 import com.queue.service.TicketService;
 import com.queue.util.PhoneUtil;
@@ -34,6 +35,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -49,8 +51,16 @@ public class TicketServiceImpl implements TicketService {
     private final RegionBusinessMapper regionBusinessMapper;
     private final QueueService queueService;
     private final StringRedisTemplate stringRedisTemplate;
+    private final PhoneCryptoService phoneCryptoService;
 
-    public TicketServiceImpl(TicketMapper ticketMapper, BusinessTypeMapper businessTypeMapper, CounterMapper counterMapper, RegionMapper regionMapper, RegionBusinessMapper regionBusinessMapper, QueueService queueService, StringRedisTemplate stringRedisTemplate) {
+    public TicketServiceImpl(TicketMapper ticketMapper,
+                             BusinessTypeMapper businessTypeMapper,
+                             CounterMapper counterMapper,
+                             RegionMapper regionMapper,
+                             RegionBusinessMapper regionBusinessMapper,
+                             QueueService queueService,
+                             StringRedisTemplate stringRedisTemplate,
+                             PhoneCryptoService phoneCryptoService) {
         this.ticketMapper = ticketMapper;
         this.businessTypeMapper = businessTypeMapper;
         this.counterMapper = counterMapper;
@@ -58,6 +68,7 @@ public class TicketServiceImpl implements TicketService {
         this.regionBusinessMapper = regionBusinessMapper;
         this.queueService = queueService;
         this.stringRedisTemplate = stringRedisTemplate;
+        this.phoneCryptoService = phoneCryptoService;
     }
 
     @Override
@@ -105,8 +116,10 @@ public class TicketServiceImpl implements TicketService {
         }
 
         // 2. Check duplicate ticket with distributed lock
-        String maskedPhone = PhoneUtil.mask(request.getPhone());
-        String lockKey = "queue:lock:dup:" + regionId + ":" + request.getBusinessTypeId() + ":" + maskedPhone;
+        PhoneCryptoService.ProtectedPhone protectedPhone = phoneCryptoService.protect(request.getPhone());
+        String maskedPhone = protectedPhone.masked();
+        String phoneHash = protectedPhone.hash();
+        String lockKey = "queue:lock:dup:" + regionId + ":" + request.getBusinessTypeId() + ":" + phoneHash;
         boolean locked = queueService.acquireLock(lockKey, 5);
         if (!locked) {
             throw new BusinessException(ResultCode.SYSTEM_ERROR);
@@ -122,10 +135,13 @@ public class TicketServiceImpl implements TicketService {
             // 查找当日同手机号+同业务类型的所有记录（含已办结）
             List<Ticket> todayTickets = ticketMapper.selectList(
                 new QueryWrapper<Ticket>()
-                    .eq("phone", maskedPhone)
                     .eq("business_type_id", request.getBusinessTypeId())
                     .ge("created_at", startOfDay)
                     .lt("created_at", endOfDay)
+                    .and(w -> w.eq("phone_hash", phoneHash)
+                        .or()
+                        .isNull("phone_hash")
+                        .eq("phone", maskedPhone))
             );
 
             if (!todayTickets.isEmpty()) {
@@ -168,6 +184,11 @@ public class TicketServiceImpl implements TicketService {
             ticket.setBusinessTypeId(request.getBusinessTypeId());
             ticket.setSource(TicketSource.ONLINE.getValue());
             ticket.setPhone(maskedPhone);
+            ticket.setPhoneCiphertext(protectedPhone.ciphertext());
+            ticket.setPhoneHash(phoneHash);
+            ticket.setPhoneMasked(maskedPhone);
+            ticket.setPhoneLast4(protectedPhone.last4());
+            ticket.setPhoneKeyVersion(protectedPhone.keyVersion());
             ticket.setName(request.getName());
             ticket.setStatus(TicketStatus.WAITING.getValue());
             ticket.setCreatedAt(now);
@@ -253,9 +274,13 @@ public class TicketServiceImpl implements TicketService {
     @Override
     public List<MyTicketVO> getMyTickets(String phone) {
         String maskedPhone = PhoneUtil.mask(phone);
+        String phoneHash = phoneCryptoService.hash(phone);
         List<Ticket> tickets = ticketMapper.selectList(
             new QueryWrapper<Ticket>()
-                .eq("phone", maskedPhone)
+                .and(w -> w.eq("phone_hash", phoneHash)
+                    .or()
+                    .isNull("phone_hash")
+                    .eq("phone", maskedPhone))
                 .orderByDesc("created_at")
                 .last("LIMIT 50")
         );
@@ -301,13 +326,17 @@ public class TicketServiceImpl implements TicketService {
     public ActiveTicketResponse getActiveTicket(Long regionId, String phone) {
         ActiveTicketResponse resp = new ActiveTicketResponse();
         String maskedPhone = PhoneUtil.mask(phone);
+        String phoneHash = phoneCryptoService.hash(phone);
 
         // Query unfinished tickets in this region
         List<Ticket> activeTickets = ticketMapper.selectList(
             new QueryWrapper<Ticket>()
                 .eq("region_id", regionId)
-                .eq("phone", maskedPhone)
                 .in("status", TicketStatus.WAITING.getValue(), TicketStatus.CALLED.getValue(), TicketStatus.SERVING.getValue())
+                .and(w -> w.eq("phone_hash", phoneHash)
+                    .or()
+                    .isNull("phone_hash")
+                    .eq("phone", maskedPhone))
                 .orderByAsc("created_at")
                 .last("LIMIT 1")
         );
@@ -381,7 +410,7 @@ public class TicketServiceImpl implements TicketService {
         } catch (DateTimeParseException ignored) {
         }
         if (phone != null && !phone.isEmpty()) {
-            wrapper.like("phone", phone);
+            applyPhoneSearchFilter(wrapper, phone);
         }
         if (name != null && !name.isEmpty()) {
             wrapper.like("name", name);
@@ -443,7 +472,7 @@ public class TicketServiceImpl implements TicketService {
             vo.setBusinessType(bt != null ? bt.getName() : "");
             vo.setStatus(t.getStatus());
             vo.setStatusText(TicketStatus.fromValue(t.getStatus()).name());
-            vo.setPhone(t.getPhone());
+            vo.setPhone(t.getPhoneMasked() != null ? t.getPhoneMasked() : t.getPhone());
             vo.setName(t.getName());
             vo.setRegionName(regionName);
             vo.setCounterName(counter != null ? counter.getName() : null);
@@ -480,24 +509,42 @@ public class TicketServiceImpl implements TicketService {
     @Override
     @Transactional
     public int markExpiredTickets() {
-        // 查询所有非当日且仍处于未办结状态的票
         LocalDateTime startOfToday = LocalDate.now().atStartOfDay();
-        List<Ticket> expiredTickets = ticketMapper.selectList(
-            new QueryWrapper<Ticket>()
-                .in("status", TicketStatus.WAITING.getValue(), TicketStatus.CALLED.getValue(), TicketStatus.SERVING.getValue())
-                .lt("created_at", startOfToday)
-        );
-        for (Ticket ticket : expiredTickets) {
-            boolean wasWaiting = TicketStatus.WAITING.getValue().equals(ticket.getStatus());
-            ticket.setStatus(TicketStatus.SKIPPED.getValue());
-            ticket.setSkipType(com.queue.enums.SkipType.SYSTEM.getValue()); // 系统过号
-            ticketMapper.updateById(ticket);
-            // 仅等待中的票需要从队列移除并扣减等待人数，已叫号/服务中的票已在 callNext 时移除
-            if (wasWaiting) {
-                queueService.dequeue(ticket.getRegionId(), ticket.getBusinessTypeId(), ticket.getId());
-                queueService.decrementWaitingCount(ticket.getRegionId(), ticket.getBusinessTypeId());
-            }
+        List<Ticket> expiredWaitingTickets = ticketMapper.selectExpiredWaitingTickets(startOfToday);
+        List<Long> expiredAssignedTicketIds = ticketMapper.selectExpiredAssignedTicketIds(startOfToday);
+        int updated = ticketMapper.markExpiredTicketsBefore(startOfToday);
+        if (updated <= 0) {
+            return 0;
         }
-        return expiredTickets.size();
+
+        if (expiredAssignedTicketIds != null && !expiredAssignedTicketIds.isEmpty()) {
+            counterMapper.resetCurrentAssignments(List.copyOf(new LinkedHashSet<>(expiredAssignedTicketIds)));
+        }
+
+        for (Ticket ticket : expiredWaitingTickets) {
+            if (ticket.getRegionId() == null || ticket.getBusinessTypeId() == null || ticket.getId() == null) {
+                continue;
+            }
+            queueService.dequeue(ticket.getRegionId(), ticket.getBusinessTypeId(), ticket.getId());
+            queueService.decrementWaitingCount(ticket.getRegionId(), ticket.getBusinessTypeId());
+        }
+        return updated;
+    }
+
+    private void applyPhoneSearchFilter(QueryWrapper<Ticket> wrapper, String phone) {
+        if (PhoneUtil.looksLikeCompletePhone(phone)) {
+            String phoneHash = phoneCryptoService.hash(phone);
+            String maskedPhone = PhoneUtil.mask(phone);
+            wrapper.and(w -> w.eq("phone_hash", phoneHash)
+                .or()
+                .isNull("phone_hash")
+                .eq("phone", maskedPhone));
+            return;
+        }
+        if (phone.matches("\\d{4}")) {
+            wrapper.eq("phone_last4", phone);
+            return;
+        }
+        wrapper.and(w -> w.like("phone_masked", phone).or().like("phone", phone));
     }
 }

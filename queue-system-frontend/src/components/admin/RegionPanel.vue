@@ -314,9 +314,6 @@ async function fetchData() {
   tableLoading.value = true
   try {
     const params = { pageNum: 1, pageSize: 9999 }
-    if (!userStore.isSuperAdmin) {
-      params.userId = Number(userStore.userId) || undefined
-    }
     const result = await request.get('/regions/list', { params })
     allFlatData.value = result.records || []
     applyFilter()

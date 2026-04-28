@@ -65,16 +65,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
-        String method = request.getMethod();
-        // Skip filter for public endpoints
-        // For regions: only skip GET (POST/PUT/DELETE require auth)
-        boolean isPublicRegionGet = path.startsWith("/api/v1/regions") && "GET".equals(method);
         return path.startsWith("/api/v1/auth/login") ||
-               path.startsWith("/api/v1/business-types") ||
-               isPublicRegionGet ||
-               path.startsWith("/api/v1/ticket") ||
-               path.startsWith("/api/v1/queue") ||
-               path.startsWith("/api/v1/qrcode") ||
                path.equals("/api/v1/health") ||
                path.startsWith("/appointment") ||
                path.startsWith("/display");

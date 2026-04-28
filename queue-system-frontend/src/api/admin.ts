@@ -22,7 +22,7 @@ export const businessTypeApi = {
 
 // 窗口 API
 export const counterApi = {
-  list: (params?: { regionId?: number; userId?: number }) =>
+  list: (params?: { regionId?: number }) =>
     request.get<CounterDTO[]>('/admin/counters', { params }),
 
   getById: (id: number) =>
@@ -91,8 +91,8 @@ export const regionBusinessApi = {
 
 // 菜单 API
 export const menuApi = {
-  list: (params?: { userId?: number }) =>
-    request.get<SysMenu[]>('/admin/menus', { params }),
+  list: () =>
+    request.get<SysMenu[]>('/admin/menus'),
 
   getById: (id: number) =>
     request.get<SysMenu>(`/admin/menus/${id}`),

@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
@@ -28,17 +29,23 @@ public class StatisticsServiceImpl implements StatisticsService {
 
     @Override
     public StatisticsResponse queryStatistics(StatisticsRequest request) {
-        List<StatisticsRecordVO> allRecords = statisticsMapper.selectStatisticsList(request);
-        Long total = (long) allRecords.size();
+        normalizeDateRange(request);
 
         int pageNum = request.getPageNum() != null ? request.getPageNum() : 1;
         int pageSize = request.getPageSize() != null ? request.getPageSize() : 10;
-        int fromIndex = (pageNum - 1) * pageSize;
-        int toIndex = Math.min(fromIndex + pageSize, allRecords.size());
+        long total = statisticsMapper.countStatistics(request);
+        if (total == 0) {
+            StatisticsResponse response = new StatisticsResponse();
+            response.setRecords(List.of());
+            response.setTotal(0L);
+            response.setPageNum(pageNum);
+            response.setPageSize(pageSize);
+            response.setTotalPages(0);
+            return response;
+        }
 
-        List<StatisticsRecordVO> pagedRecords = fromIndex < allRecords.size()
-                ? allRecords.subList(fromIndex, toIndex)
-                : List.of();
+        long offset = (long) Math.max(pageNum - 1, 0) * pageSize;
+        List<StatisticsRecordVO> pagedRecords = statisticsMapper.selectStatisticsPage(request, offset, pageSize);
 
         StatisticsResponse response = new StatisticsResponse();
         response.setRecords(pagedRecords);
@@ -51,7 +58,7 @@ public class StatisticsServiceImpl implements StatisticsService {
 
     @Override
     public void exportStatistics(StatisticsRequest request, HttpServletResponse response) {
-        request.setPageSize(Integer.MAX_VALUE);
+        normalizeDateRange(request);
         List<StatisticsRecordVO> records = statisticsMapper.selectStatisticsList(request);
 
         try (Workbook workbook = new XSSFWorkbook()) {
@@ -94,5 +101,13 @@ public class StatisticsServiceImpl implements StatisticsService {
         } catch (IOException e) {
             throw new RuntimeException("Export failed", e);
         }
+    }
+
+    private void normalizeDateRange(StatisticsRequest request) {
+        LocalDate startDate = request.getStartDate();
+        LocalDate endDate = request.getEndDate();
+
+        request.setCreatedAtStart(startDate == null ? null : startDate.atStartOfDay());
+        request.setCreatedAtEndExclusive(endDate == null ? null : endDate.plusDays(1).atStartOfDay());
     }
 }

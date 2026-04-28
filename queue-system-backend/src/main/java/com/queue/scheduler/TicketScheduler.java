@@ -7,7 +7,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * 票号定时任务：每日凌晨扫描并标记历史未办结票为过号
+ * 票号定时任务：在后台周期性清理历史未办结票
  */
 @Component
 public class TicketScheduler {
@@ -20,18 +20,23 @@ public class TicketScheduler {
         this.ticketService = ticketService;
     }
 
-    /**
-     * 每日凌晨 00:05 执行，扫描并标记所有历史未办结票为过号
-     * 作为 Redis 过期策略的兜底
-     */
     @Scheduled(cron = "0 5 0 * * ?")
     public void markExpiredTicketsOnMidnight() {
-        log.info("【定时任务】开始执行历史未办结票扫描...");
+        runExpiredTicketSweep("midnight");
+    }
+
+    @Scheduled(initialDelay = 300000, fixedDelay = 3600000)
+    public void reconcileExpiredTicketsPeriodically() {
+        runExpiredTicketSweep("hourly");
+    }
+
+    private void runExpiredTicketSweep(String source) {
+        log.info("【定时任务】开始执行历史未办结票清理，source={}", source);
         try {
             int count = ticketService.markExpiredTickets();
-            log.info("【定时任务】历史未办结票扫描完成，共处理 {} 张票", count);
+            log.info("【定时任务】历史未办结票清理完成，source={}，共处理 {} 张票", source, count);
         } catch (Exception e) {
-            log.error("【定时任务】历史未办结票扫描异常", e);
+            log.error("【定时任务】历史未办结票清理异常，source={}", source, e);
         }
     }
 }

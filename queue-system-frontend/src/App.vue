@@ -10,6 +10,7 @@ import { useRouter } from 'vue-router'
 
 const userStore = useUserStore()
 const router = useRouter()
+const activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click']
 
 // 记录用户活动的函数
 function recordActivity() {
@@ -20,16 +21,14 @@ function recordActivity() {
 
 // 监听用户活动事件
 function setupActivityListeners() {
-  const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click']
-  events.forEach(event => {
+  activityEvents.forEach(event => {
     document.addEventListener(event, recordActivity, { passive: true })
   })
 }
 
 // 移除活动监听器
 function removeActivityListeners() {
-  const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click']
-  events.forEach(event => {
+  activityEvents.forEach(event => {
     document.removeEventListener(event, recordActivity)
   })
 }

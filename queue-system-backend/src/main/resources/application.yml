@@ -27,8 +27,12 @@ app:
   ip:                  # 部署时手动指定，留空则自动获取本机IP
   frontend:
     port: 5173
+    base-url:
   cors:
     extra-origins:     # 额外的 CORS 允许源，逗号分隔
+  phone-encryption:
+    master-key:        # 建议部署时通过环境变量覆盖，未配置时回退到 jwt.secret
+    key-version: 1
 
 logging:
   file:

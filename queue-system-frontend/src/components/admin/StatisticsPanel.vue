@@ -225,11 +225,7 @@ function filterRegionByName(query, node) {
 
 async function fetchRegions() {
   try {
-    const params = {}
-    if (!userStore.isSuperAdmin) {
-      params.userId = Number(userStore.userId) || undefined
-    }
-    regions.value = await request.get('/regions', { params })
+    regions.value = await request.get('/regions')
   } catch (e) {
     console.error('加载区域失败:', e)
     regions.value = []

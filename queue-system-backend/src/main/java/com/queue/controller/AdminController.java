@@ -6,8 +6,10 @@ import com.queue.common.Result;
 import com.queue.common.ResultCode;
 import com.queue.dto.AdminTicketVO;
 import com.queue.dto.BusinessTypeDetailVO;
+import com.queue.dto.CounterRecentServiceRow;
 import com.queue.dto.CounterDTO;
 import com.queue.dto.CounterStatsVO;
+import com.queue.dto.CounterStatsSummaryRow;
 import com.queue.entity.BusinessType;
 import com.queue.entity.Counter;
 import com.queue.entity.CounterBusiness;
@@ -17,26 +19,28 @@ import com.queue.entity.SysUser;
 import com.queue.entity.Ticket;
 import com.queue.enums.CounterStatus;
 import com.queue.enums.TicketStatus;
+import com.queue.mapper.AnalyticsMapper;
 import com.queue.mapper.BusinessTypeMapper;
 import com.queue.mapper.CounterBusinessMapper;
 import com.queue.mapper.CounterMapper;
 import com.queue.mapper.CounterOperatorMapper;
 import com.queue.mapper.SysUserMapper;
 import com.queue.mapper.TicketMapper;
+import com.queue.service.AuthContextService;
 import com.queue.service.BusinessTypeService;
+import com.queue.service.PhoneCryptoService;
 import com.queue.service.QueueService;
 import com.queue.service.RegionBusinessService;
 import com.queue.service.RegionService;
 import com.queue.service.TicketService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -50,41 +54,55 @@ public class AdminController {
     private final TicketService ticketService;
     private final RegionService regionService;
     private final BusinessTypeMapper businessTypeMapper;
+    private final AnalyticsMapper analyticsMapper;
     private final CounterMapper counterMapper;
     private final CounterBusinessMapper counterBusinessMapper;
     private final CounterOperatorMapper counterOperatorMapper;
     private final TicketMapper ticketMapper;
     private final SysUserMapper sysUserMapper;
     private final QueueService queueService;
+    private final AuthContextService authContextService;
+    private final PhoneCryptoService phoneCryptoService;
 
     public AdminController(BusinessTypeService businessTypeService,
                           RegionBusinessService regionBusinessService,
                           TicketService ticketService,
                           RegionService regionService,
                           BusinessTypeMapper businessTypeMapper,
+                          AnalyticsMapper analyticsMapper,
                           CounterMapper counterMapper,
                           CounterBusinessMapper counterBusinessMapper,
                           CounterOperatorMapper counterOperatorMapper,
                           TicketMapper ticketMapper,
                           SysUserMapper sysUserMapper,
-                          QueueService queueService) {
+                          QueueService queueService,
+                          AuthContextService authContextService,
+                          PhoneCryptoService phoneCryptoService) {
         this.businessTypeService = businessTypeService;
         this.regionBusinessService = regionBusinessService;
         this.ticketService = ticketService;
         this.regionService = regionService;
         this.businessTypeMapper = businessTypeMapper;
+        this.analyticsMapper = analyticsMapper;
         this.counterMapper = counterMapper;
         this.counterBusinessMapper = counterBusinessMapper;
         this.counterOperatorMapper = counterOperatorMapper;
         this.ticketMapper = ticketMapper;
         this.sysUserMapper = sysUserMapper;
         this.queueService = queueService;
+        this.authContextService = authContextService;
+        this.phoneCryptoService = phoneCryptoService;
     }
 
     // Business Types CRUD
     @GetMapping("/business-types")
-    public Result<List<BusinessType>> listBusinessTypes(@RequestParam(required = false) Long regionId) {
+    public Result<List<BusinessType>> listBusinessTypes(@RequestParam(required = false) Long regionId,
+                                                        HttpServletRequest request) {
         if (regionId != null) {
+            SysUser currentUser = authContextService.getCurrentUser(request);
+            if (currentUser != null) {
+                authContextService.assertRegionAccess(currentUser, regionId);
+            }
             // 返回该区域关联的业务类型（用于窗口管理等场景）
             return Result.ok(regionBusinessService.listBusinessTypesByRegion(regionId));
         }
@@ -116,41 +134,18 @@ public class AdminController {
     // Counters CRUD
     @GetMapping("/counters")
     public Result<List<CounterDTO>> listCounters(@RequestParam(required = false) Long regionId,
-                                                  @RequestParam(required = false) Long userId) {
+                                                 HttpServletRequest request) {
+        SysUser currentUser = authContextService.requireCurrentUser(request);
         QueryWrapper<Counter> qw = new QueryWrapper<>();
 
         // 区域权限过滤
-        Set<Long> allowedRegionIds = null;
-        if (userId != null && userId > 0) {
-            SysUser user = sysUserMapper.selectById(userId);
-            if (user != null && !"SUPER_ADMIN".equals(user.getRole())) {
-                List<Long> scopedRoots = sysUserMapper.selectRegionScopeIds(userId);
-                if (scopedRoots != null && !scopedRoots.isEmpty()) {
-                    Set<Long> all = new HashSet<>();
-                    for (Long rid : scopedRoots) {
-                        if (rid == null) continue;
-                        all.addAll(regionService.getDescendantRegionIds(rid));
-                    }
-                    allowedRegionIds = all;
-                } else if (user.getRegionCode() != null && !user.getRegionCode().isEmpty()) {
-                    Region userRegion = regionService.getByCode(user.getRegionCode());
-                    if (userRegion != null) {
-                        List<Long> descendants = regionService.getDescendantRegionIds(userRegion.getId());
-                        allowedRegionIds = descendants.stream().collect(Collectors.toSet());
-                    } else {
-                        allowedRegionIds = Collections.emptySet();
-                    }
-                } else {
-                    allowedRegionIds = Collections.emptySet();
-                }
+        Set<Long> allowedRegionIds = authContextService.resolveAllowedRegionIds(currentUser);
+        if (regionId != null) {
+            if (allowedRegionIds != null && !allowedRegionIds.contains(regionId)) {
+                return Result.ok(Collections.emptyList());
             }
-            // SUPER_ADMIN: allowedRegionIds = null，不做过滤
-        } else if (regionId != null) {
-            // 保留旧的兼容：直接按 regionId 过滤
             qw.eq("region_id", regionId);
-        }
-
-        if (allowedRegionIds != null && !allowedRegionIds.isEmpty()) {
+        } else if (allowedRegionIds != null && !allowedRegionIds.isEmpty()) {
             qw.in("region_id", allowedRegionIds);
         } else if (allowedRegionIds != null && allowedRegionIds.isEmpty()) {
             // 有权限限制但没有可用区域 → 返回空列表
@@ -158,15 +153,12 @@ public class AdminController {
         }
 
         // 窗口操作员只能看到自己被分配的窗口
-        if (userId != null && userId > 0) {
-            SysUser user = sysUserMapper.selectById(userId);
-            if (user != null && "WINDOW_OPERATOR".equals(user.getRole())) {
-                List<Long> assignedCounterIds = counterOperatorMapper.selectCounterIdsByUserId(userId);
-                if (assignedCounterIds == null || assignedCounterIds.isEmpty()) {
-                    return Result.ok(Collections.emptyList());
-                }
-                qw.in("id", assignedCounterIds);
+        if ("WINDOW_OPERATOR".equals(currentUser.getRole())) {
+            List<Long> assignedCounterIds = counterOperatorMapper.selectCounterIdsByUserId(currentUser.getId());
+            if (assignedCounterIds == null || assignedCounterIds.isEmpty()) {
+                return Result.ok(Collections.emptyList());
             }
+            qw.in("id", assignedCounterIds);
         }
 
         List<Counter> counters = counterMapper.selectList(qw);
@@ -211,9 +203,11 @@ public class AdminController {
     }
 
     @GetMapping("/counters/{id}")
-    public Result<CounterDTO> getCounter(@PathVariable Long id) {
+    public Result<CounterDTO> getCounter(@PathVariable Long id, HttpServletRequest request) {
+        SysUser currentUser = authContextService.requireCurrentUser(request);
         Counter c = counterMapper.selectById(id);
         if (c == null) return Result.error(400, "窗口不存在");
+        authContextService.assertRegionAccess(currentUser, c.getRegionId());
         CounterDTO dto = new CounterDTO();
         dto.setId(c.getId());
         dto.setRegionId(c.getRegionId());
@@ -238,9 +232,10 @@ public class AdminController {
     @PostMapping("/counters")
     @Transactional
     public Result<CounterDTO> createCounter(@RequestBody CounterDTO dto,
-            @RequestParam(required = false) Long userId) {
+                                            HttpServletRequest request) {
+        SysUser currentUser = authContextService.requireCurrentUser(request);
         // 新增：校验用户是否有权在该区域创建
-        checkRegionAccess(userId, dto.getRegionId());
+        authContextService.assertRegionAccess(currentUser, dto.getRegionId());
         Counter counter = new Counter();
         counter.setRegionId(dto.getRegionId());
         counter.setNumber(dto.getNumber());
@@ -284,11 +279,13 @@ public class AdminController {
     @PutMapping("/counters/{id}")
     @Transactional
     public Result<Void> updateCounter(@PathVariable Long id, @RequestBody CounterDTO dto,
-            @RequestParam(required = false) Long userId) {
+                                      HttpServletRequest request) {
+        SysUser currentUser = authContextService.requireCurrentUser(request);
         Counter counter = counterMapper.selectById(id);
         if (counter == null) return Result.error(400, "窗口不存在");
         // 检查原区域权限
-        checkRegionAccess(userId, counter.getRegionId());
+        authContextService.assertRegionAccess(currentUser, counter.getRegionId());
+        authContextService.assertRegionAccess(currentUser, dto.getRegionId());
 
         counter.setRegionId(dto.getRegionId());
         counter.setNumber(dto.getNumber());
@@ -332,11 +329,12 @@ public class AdminController {
 
     @DeleteMapping("/counters/{id}")
     public Result<Void> deleteCounter(@PathVariable Long id,
-            @RequestParam(required = false) Long userId) {
+                                      HttpServletRequest request) {
+        SysUser currentUser = authContextService.requireCurrentUser(request);
         Counter counter = counterMapper.selectById(id);
         if (counter == null) return Result.error(400, "窗口不存在");
         // 检查区域权限
-        checkRegionAccess(userId, counter.getRegionId());
+        authContextService.assertRegionAccess(currentUser, counter.getRegionId());
         if (!CounterStatus.IDLE.getValue().equals(counter.getStatus())) {
             return Result.error(ResultCode.COUNTER_NOT_OPERABLE);
         }
@@ -366,44 +364,15 @@ public class AdminController {
             }
         }
 
-        // 今日该窗口的票
         LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
         LocalDateTime endOfDay = startOfDay.plusDays(1);
-        List<Ticket> todayTickets = ticketMapper.selectList(
-            new QueryWrapper<Ticket>()
-                .eq("counter_id", id)
-                .ge("created_at", startOfDay)
-                .lt("created_at", endOfDay)
-        );
-
-        // 统计
-        stats.setTodayServedCount((int) todayTickets.stream()
-            .filter(t -> "completed".equals(t.getStatus())).count());
-        stats.setTodayCalledCount((int) todayTickets.stream()
-            .filter(t -> "called".equals(t.getStatus()) || "serving".equals(t.getStatus()) || "completed".equals(t.getStatus())).count());
-        stats.setTodaySkippedCount((int) todayTickets.stream()
-            .filter(t -> "skipped".equals(t.getStatus())).count());
-
-        // 平均服务时长
-        List<Ticket> completedWithServe = todayTickets.stream()
-            .filter(t -> "completed".equals(t.getStatus()) && t.getServedAt() != null && t.getCompletedAt() != null)
-            .collect(Collectors.toList());
-        if (!completedWithServe.isEmpty()) {
-            double avg = completedWithServe.stream()
-                .mapToLong(t -> Duration.between(t.getServedAt(), t.getCompletedAt()).toMinutes())
-                .average().orElse(0.0);
-            stats.setAvgServiceMinutes(Math.round(avg * 10.0) / 10.0);
-        }
-
-        // 平均等待时长
-        List<Ticket> completedOrSkipped = todayTickets.stream()
-            .filter(t -> ("completed".equals(t.getStatus()) || "skipped".equals(t.getStatus())) && t.getCalledAt() != null && t.getCreatedAt() != null)
-            .collect(Collectors.toList());
-        if (!completedOrSkipped.isEmpty()) {
-            double avg = completedOrSkipped.stream()
-                .mapToLong(t -> Duration.between(t.getCreatedAt(), t.getCalledAt()).toMinutes())
-                .average().orElse(0.0);
-            stats.setAvgWaitMinutes(Math.round(avg * 10.0) / 10.0);
+        CounterStatsSummaryRow summary = analyticsMapper.selectCounterStatsSummary(id, startOfDay, endOfDay);
+        if (summary != null) {
+            stats.setTodayServedCount(summary.getTodayServedCount() == null ? 0 : summary.getTodayServedCount().intValue());
+            stats.setTodayCalledCount(summary.getTodayCalledCount() == null ? 0 : summary.getTodayCalledCount().intValue());
+            stats.setTodaySkippedCount(summary.getTodaySkippedCount() == null ? 0 : summary.getTodaySkippedCount().intValue());
+            stats.setAvgServiceMinutes(summary.getAvgServiceMinutes() == null ? 0.0 : summary.getAvgServiceMinutes());
+            stats.setAvgWaitMinutes(summary.getAvgWaitMinutes() == null ? 0.0 : summary.getAvgWaitMinutes());
         }
 
         // 支持的业务类型及其等待人数
@@ -423,31 +392,16 @@ public class AdminController {
             .collect(Collectors.toList());
         stats.setWaitingByBusiness(waitingInfos);
 
-        // 最近服务记录（最近10条）
-        List<Ticket> recentTickets = todayTickets.stream()
-            .filter(t -> t.getCalledAt() != null || t.getCompletedAt() != null)
-            .sorted((a, b) -> {
-                LocalDateTime aTime = a.getCompletedAt() != null ? a.getCompletedAt() : a.getCalledAt();
-                LocalDateTime bTime = b.getCompletedAt() != null ? b.getCompletedAt() : b.getCalledAt();
-                if (aTime == null) return 1;
-                if (bTime == null) return -1;
-                return bTime.compareTo(aTime);
-            })
-            .limit(10)
-            .collect(Collectors.toList());
-
-        List<CounterStatsVO.RecentServiceRecord> recentRecords = recentTickets.stream().map(t -> {
+        List<CounterRecentServiceRow> recentRows = analyticsMapper.selectCounterRecentServices(id, startOfDay, endOfDay, 10);
+        List<CounterStatsVO.RecentServiceRecord> recentRecords = recentRows.stream().map(t -> {
             CounterStatsVO.RecentServiceRecord rec = new CounterStatsVO.RecentServiceRecord();
             rec.setTicketNo(t.getTicketNo());
-            BusinessType bt = businessTypeMapper.selectById(t.getBusinessTypeId());
-            rec.setBusinessTypeName(bt != null ? bt.getName() : "");
-            rec.setCustomerName(t.getName() != null ? t.getName() : "");
+            rec.setBusinessTypeName(t.getBusinessTypeName() != null ? t.getBusinessTypeName() : "");
+            rec.setCustomerName(t.getCustomerName() != null ? t.getCustomerName() : "");
             rec.setStatus(t.getStatus());
             rec.setCalledAt(t.getCalledAt() != null ? t.getCalledAt().toString() : "");
             rec.setCompletedAt(t.getCompletedAt() != null ? t.getCompletedAt().toString() : "");
-            if (t.getServedAt() != null && t.getCompletedAt() != null) {
-                rec.setServiceMinutes(Math.round(Duration.between(t.getServedAt(), t.getCompletedAt()).toMinutes() * 10.0) / 10.0);
-            }
+            rec.setServiceMinutes(t.getServiceMinutes() == null ? 0.0 : t.getServiceMinutes());
             return rec;
         }).collect(Collectors.toList());
         stats.setRecentServices(recentRecords);
@@ -457,50 +411,10 @@ public class AdminController {
 
     // Get window operators by region
     @GetMapping("/operators")
-    public Result<List<SysUser>> getOperatorsByRegion(@RequestParam Long regionId) {
+    public Result<List<SysUser>> getOperatorsByRegion(@RequestParam Long regionId, HttpServletRequest request) {
+        SysUser currentUser = authContextService.requireCurrentUser(request);
+        authContextService.assertRegionAccess(currentUser, regionId);
         return Result.ok(sysUserMapper.selectByRegionIdAndRole(regionId, "WINDOW_OPERATOR"));
-    }
-
-    /**
-     * Check if user has access to a specific region.
-     */
-    private void checkRegionAccess(Long userId, Long regionId) {
-        if (userId == null || userId <= 0) {
-            return;
-        }
-        SysUser user = sysUserMapper.selectById(userId);
-        if (user == null || "SUPER_ADMIN".equals(user.getRole())) {
-            return;
-        }
-        Set<Long> allowed = resolveAllowedRegionIds(user);
-        if (allowed.isEmpty() || !allowed.contains(regionId)) {
-            throw new BusinessException(403, "无权限操作该区域");
-        }
-    }
-
-    private Set<Long> resolveAllowedRegionIds(SysUser user) {
-        if (user == null || "SUPER_ADMIN".equals(user.getRole())) {
-            return null;
-        }
-        List<Long> scopedRoots = sysUserMapper.selectRegionScopeIds(user.getId());
-        if (scopedRoots != null && !scopedRoots.isEmpty()) {
-            Set<Long> all = new HashSet<>();
-            for (Long rid : scopedRoots) {
-                if (rid == null) continue;
-                all.addAll(regionService.getDescendantRegionIds(rid));
-            }
-            return all;
-        }
-
-        Long rootId = user.getRegionId();
-        if (rootId == null && user.getRegionCode() != null && !user.getRegionCode().isEmpty()) {
-            Region r = regionService.getByCode(user.getRegionCode());
-            rootId = r == null ? null : r.getId();
-        }
-        if (rootId == null) {
-            return Collections.emptySet();
-        }
-        return new HashSet<>(regionService.getDescendantRegionIds(rootId));
     }
 
     // Ticket list for admin
@@ -513,30 +427,35 @@ public class AdminController {
             @RequestParam(required = false) String phone,
             @RequestParam(required = false) String name,
             @RequestParam(required = false) String ticketNo,
-            @RequestParam(required = false) Long userId) {
-        Set<Long> allowedRegionIds = null;
-        if (userId != null && userId > 0) {
-            SysUser user = sysUserMapper.selectById(userId);
-            if (user != null && !"SUPER_ADMIN".equals(user.getRole())) {
-                Set<Long> allowed = resolveAllowedRegionIds(user);
-                allowedRegionIds = allowed == null ? null : allowed;
-            }
-        }
+            HttpServletRequest request) {
+        SysUser currentUser = authContextService.requireCurrentUser(request);
+        Set<Long> allowedRegionIds = authContextService.resolveAllowedRegionIds(currentUser);
         return Result.ok(ticketService.listTickets(status, date, startDate, endDate, phone, name, ticketNo, allowedRegionIds));
+    }
+
+    @GetMapping("/tickets/{id}/phone")
+    public Result<java.util.Map<String, String>> getTicketPhone(@PathVariable Long id, HttpServletRequest request) {
+        SysUser currentUser = authContextService.requireCurrentUser(request);
+        Ticket ticket = ticketMapper.selectById(id);
+        if (ticket == null) {
+            return Result.error(ResultCode.TICKET_NOT_FOUND);
+        }
+        authContextService.assertRegionAccess(currentUser, ticket.getRegionId());
+        if (ticket.getPhoneCiphertext() == null || ticket.getPhoneCiphertext().isBlank()) {
+            return Result.error(400, "该记录缺少可解密手机号");
+        }
+        return Result.ok(java.util.Map.of(
+                "phone", phoneCryptoService.decrypt(ticket.getPhoneCiphertext()),
+                "maskedPhone", ticket.getPhoneMasked() != null ? ticket.getPhoneMasked() : ticket.getPhone()
+        ));
     }
 
     // Business type detail stats: region + counter + operator + ticket count
     @GetMapping("/business-types/{id}/detail")
     public Result<List<BusinessTypeDetailVO>> getBusinessTypeDetail(@PathVariable Long id,
-                                                                     @RequestParam(required = false) Long userId) {
-        Set<Long> allowedRegionIds = null;
-        if (userId != null && userId > 0) {
-            SysUser user = sysUserMapper.selectById(userId);
-            if (user != null && !"SUPER_ADMIN".equals(user.getRole())) {
-                Set<Long> allowed = resolveAllowedRegionIds(user);
-                allowedRegionIds = allowed == null ? null : allowed;
-            }
-        }
+                                                                    HttpServletRequest request) {
+        SysUser currentUser = authContextService.requireCurrentUser(request);
+        Set<Long> allowedRegionIds = authContextService.resolveAllowedRegionIds(currentUser);
         return Result.ok(businessTypeService.getBusinessTypeDetail(id, allowedRegionIds));
     }
 }

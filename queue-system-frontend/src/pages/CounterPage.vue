@@ -78,7 +78,7 @@
         </div>
         <div class="overview-item">
           <span class="overview-label">等待人数</span>
-          <span class="overview-value mono">{{ waitingQueue.length }}</span>
+          <span class="overview-value mono">{{ waitingTotalCount }}</span>
         </div>
       </div>
 
@@ -96,7 +96,7 @@
       <div class="queue-panel" :class="{ 'tab-hidden': activeTab !== 'queue' }">
         <div class="panel-header">
           <span class="panel-title">等待队列</span>
-          <span class="queue-count mono">{{ waitingQueue.length }}</span>
+          <span class="queue-count mono">{{ waitingTotalCount }}</span>
         </div>
         <div class="queue-list">
           <div v-if="waitingQueue.length === 0" class="no-queue">
@@ -212,22 +212,21 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, defineAsyncComponent } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
-import { useCommonStore } from '../stores/common'
-import { callNext, recall, skip, serve, complete, togglePause } from '../api/counter'
-import { getScreenData, getTicketList } from '../api/screen'
+import { callNext, recall, skip, serve, complete, togglePause, getCounterSnapshot } from '../api/counter'
 import { counterApi } from '../api/admin'
 import { ElMessage } from 'element-plus'
 import { SwitchFilled, Location, UserFilled, Avatar, RefreshRight, ChatLineRound } from '@element-plus/icons-vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { getDisplayTicketNo } from '../utils/ticketUtils'
-import AiQueryPanel from '../components/admin/AiQueryPanel.vue'
+const AiQueryPanel = defineAsyncComponent(() => import('../components/admin/AiQueryPanel.vue'))
+
+const SCREEN_POLL_INTERVAL_MS = 5000
 
 const router = useRouter()
 const userStore = useUserStore()
-const store = useCommonStore()
 
 const aiDrawerVisible = ref(false)
 const canUseAi = computed(() => userStore.isSuperAdmin || userStore.role === 'WINDOW_OPERATOR')
@@ -276,17 +275,19 @@ const completing = ref(false)
 const recalling = ref(false)
 const recallCount = ref(0)
 const waitingQueue = ref([])
+const waitingTotalCount = ref(0)
 
 // Mobile tabs
 const activeTab = ref('queue')
 const tabs = computed(() => [
-  { key: 'queue', label: `队列 ${waitingQueue.value.length}`, icon: '📋' },
+  { key: 'queue', label: `队列 ${waitingTotalCount.value}`, icon: '📋' },
   { key: 'action', label: '操作', icon: '⚡' },
   { key: 'stats', label: '统计', icon: '📊' },
 ])
 
 let serveTimer = null
 let pollTimer = null
+let pollInFlight = false
 
 // localStorage key: 窗口ID + 日期，确保每天独立计数
 function todayKey() {
@@ -309,8 +310,14 @@ function loadCounterState() {
       todayStats.value[3].value = String(s.skipStats ?? 0)
       history.value = Array.isArray(s.history) ? s.history : []
       historyPage.value = 1
+      return
     }
   } catch {}
+  recallCount.value = 0
+  todayStats.value[2].value = '0'
+  todayStats.value[3].value = '0'
+  history.value = []
+  historyPage.value = 1
 }
 
 function saveCounterState() {
@@ -330,17 +337,18 @@ onMounted(async () => {
   timeTimer = setInterval(updateTime, 1000)
   await loadCounters()
   restoreDefaultCounter()
-  await store.fetchBusinessTypes()
   loadCounterState()
   await fetchData()
   updateActiveTab(true)
-  pollTimer = setInterval(fetchData, 5000)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  startPolling()
 })
 
 onUnmounted(() => {
   if (timeTimer) clearInterval(timeTimer)
-  if (pollTimer) clearInterval(pollTimer)
+  stopPolling()
   if (historyWheelResetTimer) clearTimeout(historyWheelResetTimer)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 
 watch(historyTotalPages, (p) => {
@@ -349,9 +357,7 @@ watch(historyTotalPages, (p) => {
 
 async function loadCounters() {
   try {
-    // 超级管理员不过滤；其他用户按区域权限过滤
-    const params = userStore.isSuperAdmin ? {} : { userId: Number(userStore.userId) || undefined }
-    counterList.value = await counterApi.list(params)
+    counterList.value = await counterApi.list()
   } catch {
     counterList.value = []
   }
@@ -398,7 +404,7 @@ function updateActiveTab(force = false) {
 
 onUnmounted(() => {
   clearInterval(serveTimer)
-  clearInterval(pollTimer)
+  stopPolling()
 })
 
 async function selectCounter(id) {
@@ -409,48 +415,75 @@ async function selectCounter(id) {
   updateActiveTab(true)
 }
 
+function buildWaitingQueue(waitingQueueSnapshot = []) {
+  return (waitingQueueSnapshot || [])
+    .map((item, idx) => {
+      return {
+        id: item.id ?? `${item.ticketNo}-${idx}`,
+        ticketNo: item.ticketNo,
+        businessType: item.businessTypeName || '—',
+        reactivated: Boolean(item.reactivated),
+        createdAt: item.createdAt || null
+      }
+    })
+}
+
 async function fetchData() {
   if (!counterId.value) return
+  if (document.hidden) return
+  if (pollInFlight) return
+  pollInFlight = true
   try {
-    const data = await getScreenData({ regionCode: userStore.regionCode })
-    const myCounterName = currentCounter.value?.name
-    if (!myCounterName) return
+    const snapshot = await getCounterSnapshot(counterId.value)
+    paused.value = Boolean(snapshot.paused || snapshot.currentStatus === 'paused')
+    waitingTotalCount.value = Number(snapshot.waitingCount || 0)
+    waitingQueue.value = buildWaitingQueue(snapshot.waitingQueue || [])
 
-    const myCounter = (data.counters || []).find(c => c.name === myCounterName)
-    if (myCounter) {
-      paused.value = myCounter.status === 'paused'
-    }
-
-    const allWaiting = await getTicketList({ status: 'waiting' })
-    const btIds = currentCounter.value?.businessTypeIds || []
-    waitingQueue.value = btIds.length > 0
-      ? allWaiting.filter(t => {
-          const bt = store.businessTypes.find(b => b.id === t.businessTypeId || b.name === t.businessType)
-          return bt && btIds.includes(bt.id)
-        })
-      : []
-
-    const call = (data.currentCalls || []).find(c => c.counterName === myCounterName)
-    if (call) {
-      const currentTicket = allWaiting.find(t => t.ticketNo === call.ticketNo)
+    if (snapshot.currentTicketNo) {
+      const displayTicketNo = getDisplayTicketNo(snapshot.currentTicketNo)
       serving.value = {
-        number: getDisplayTicketNo(call.ticketNo),
-        biz: currentTicket?.businessType || serving.value?.biz || '—',
-        status: serving.value?.status === 'serving' ? 'serving' : 'called'
+        number: displayTicketNo,
+        biz: snapshot.currentBusinessTypeName || serving.value?.biz || '—',
+        status: snapshot.currentTicketStatus || 'called'
       }
-    } else if (serving.value?.status !== 'serving') {
+    } else {
       serving.value = null
     }
 
-    if (data.stats) {
-      todayStats.value[0].value = String(data.stats.completedCount ?? 0)
-      todayStats.value[1].value = data.stats.waitingCount != null ? String(data.stats.waitingCount) : '0'
-    }
+    todayStats.value[0].value = String(snapshot.todayCompletedCount ?? 0)
+    todayStats.value[1].value = String(snapshot.waitingCount ?? 0)
 
     updateActiveTab(false)
   } catch (err) {
     console.error('fetchData error:', err)
+  } finally {
+    pollInFlight = false
   }
+}
+
+function startPolling() {
+  stopPolling()
+  pollTimer = setInterval(() => {
+    if (!document.hidden) {
+      fetchData()
+    }
+  }, SCREEN_POLL_INTERVAL_MS)
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+function handleVisibilityChange() {
+  if (!document.hidden) {
+    fetchData()
+    startPolling()
+    return
+  }
+  stopPolling()
 }
 
 function formatTimer(s) {
@@ -640,7 +673,7 @@ async function handleTogglePause() {
   if (!counterId.value) return
   try {
     await togglePause(counterId.value)
-    paused.value = !paused.value
+    await fetchData()
     if (paused.value) {
       updateActiveTab(true)
     }

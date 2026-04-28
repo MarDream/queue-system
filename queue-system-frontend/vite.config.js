@@ -40,6 +40,21 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true
         }
       }
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return
+            if (id.includes('element-plus')) return 'element-plus'
+            if (id.includes('@element-plus/icons-vue')) return 'element-plus-icons'
+            if (id.includes('vue') || id.includes('pinia') || id.includes('vue-router')) return 'vue-core'
+            if (id.includes('sortablejs')) return 'sortable'
+            if (id.includes('qrcode')) return 'qrcode'
+            return 'vendor'
+          }
+        }
+      }
     }
   }
 })

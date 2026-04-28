@@ -220,7 +220,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, defineAsyncComponent } from 'vue'
 import { SwitchButton, Location, UserFilled, Avatar } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
@@ -228,16 +228,17 @@ import { menuApi } from '../api/admin'
 import request from '../api/index'
 import Sortable from 'sortablejs'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import DashboardPanel from '../components/admin/DashboardPanel.vue'
-import RegionPanel from '../components/admin/RegionPanel.vue'
-import BusinessTypePanel from '../components/admin/BusinessTypePanel.vue'
-import CounterPanel from '../components/admin/CounterPanel.vue'
-import QrCodePanel from '../components/admin/QrCodePanel.vue'
-import UserPanel from '../components/admin/UserPanel.vue'
-import MenuPanel from '../components/admin/MenuPanel.vue'
-import StatisticsPanel from '../components/admin/StatisticsPanel.vue'
-import AiQueryPanel from '../components/admin/AiQueryPanel.vue'
 import ContextMenu from '../components/ContextMenu.vue'
+
+const DashboardPanel = defineAsyncComponent(() => import('../components/admin/DashboardPanel.vue'))
+const RegionPanel = defineAsyncComponent(() => import('../components/admin/RegionPanel.vue'))
+const BusinessTypePanel = defineAsyncComponent(() => import('../components/admin/BusinessTypePanel.vue'))
+const CounterPanel = defineAsyncComponent(() => import('../components/admin/CounterPanel.vue'))
+const QrCodePanel = defineAsyncComponent(() => import('../components/admin/QrCodePanel.vue'))
+const UserPanel = defineAsyncComponent(() => import('../components/admin/UserPanel.vue'))
+const MenuPanel = defineAsyncComponent(() => import('../components/admin/MenuPanel.vue'))
+const StatisticsPanel = defineAsyncComponent(() => import('../components/admin/StatisticsPanel.vue'))
+const AiQueryPanel = defineAsyncComponent(() => import('../components/admin/AiQueryPanel.vue'))
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -897,11 +898,7 @@ async function handleCtxSelect(item) {
 
 async function loadMenus() {
   try {
-    const params = {}
-    if (!userStore.isSuperAdmin) {
-      params.userId = Number(userStore.userId) || undefined
-    }
-    const data = await menuApi.list(params)
+    const data = await menuApi.list()
     menuList.value = (data || [])
       .filter(item => item.path !== '/admin?tab=roles')
       .map(item => ({

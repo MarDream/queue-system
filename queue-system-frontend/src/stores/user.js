@@ -6,6 +6,7 @@ import router from '../router'
 const SESSION_TIMEOUT_MS = 60 * 60 * 1000 // 1小时
 const SESSION_CHECK_INTERVAL_MS = 60 * 1000 // 每分钟检测一次
 const SESSION_ACTIVITY_KEY = 'lastActivityTime'
+const SESSION_ACTIVITY_WRITE_INTERVAL_MS = 30 * 1000 // 最多每30秒落盘一次
 
 function normalizeToken(raw) {
   if (!raw) return ''
@@ -28,11 +29,32 @@ export const useUserStore = defineStore('user', () => {
   const buttonCodes = ref(JSON.parse(localStorage.getItem('buttonCodes') || '[]'))
 
   let sessionCheckTimer = null
+  let lastActivityWrittenAt = Number(localStorage.getItem(SESSION_ACTIVITY_KEY) || 0) || 0
 
   const isLoggedIn = computed(() => !!token.value)
   const isSuperAdmin = computed(() => role.value === 'SUPER_ADMIN')
   const isRegionAdmin = computed(() => role.value === 'REGION_ADMIN')
   const isWindowOperator = computed(() => role.value === 'WINDOW_OPERATOR')
+
+  function setStorageValue(key, value) {
+    if (value == null) {
+      if (localStorage.getItem(key) !== null) {
+        localStorage.removeItem(key)
+      }
+      return
+    }
+    const nextValue = String(value)
+    if (localStorage.getItem(key) !== nextValue) {
+      localStorage.setItem(key, nextValue)
+    }
+  }
+
+  function setStorageJson(key, value) {
+    const nextValue = JSON.stringify(value ?? [])
+    if (localStorage.getItem(key) !== nextValue) {
+      localStorage.setItem(key, nextValue)
+    }
+  }
 
   function setUser(userData) {
     token.value = normalizeToken(userData.token)
@@ -48,32 +70,40 @@ export const useUserStore = defineStore('user', () => {
 
     // Save to localStorage
     if (token.value) {
-      localStorage.setItem('token', token.value)
+      setStorageValue('token', token.value)
     } else {
-      localStorage.removeItem('token')
+      setStorageValue('token', null)
     }
-    localStorage.setItem('userId', userData.userId)
-    localStorage.setItem('username', userData.username)
-    localStorage.setItem('name', userData.name)
-    localStorage.setItem('role', userData.role)
+    setStorageValue('userId', userData.userId)
+    setStorageValue('username', userData.username || '')
+    setStorageValue('name', userData.name || '')
+    setStorageValue('role', userData.role || '')
     if (userData.regionId) {
-      localStorage.setItem('regionId', userData.regionId)
+      setStorageValue('regionId', userData.regionId)
+    } else {
+      setStorageValue('regionId', null)
     }
     if (userData.regionCode) {
-      localStorage.setItem('regionCode', userData.regionCode)
+      setStorageValue('regionCode', userData.regionCode)
     } else {
-      localStorage.removeItem('regionCode')
+      setStorageValue('regionCode', null)
     }
-    localStorage.setItem('regionName', userData.regionName || '')
-    localStorage.setItem('menuPaths', JSON.stringify(userData.menuPaths || []))
-    localStorage.setItem('buttonCodes', JSON.stringify(userData.buttonCodes || []))
+    setStorageValue('regionName', userData.regionName || '')
+    setStorageJson('menuPaths', userData.menuPaths || [])
+    setStorageJson('buttonCodes', userData.buttonCodes || [])
 
     // 登录成功后启动 session 超时检测
     startSessionMonitor()
   }
 
-  function recordActivity() {
-    localStorage.setItem(SESSION_ACTIVITY_KEY, Date.now().toString())
+  function recordActivity(force = false) {
+    if (!token.value) return
+    const now = Date.now()
+    if (!force && lastActivityWrittenAt && now - lastActivityWrittenAt < SESSION_ACTIVITY_WRITE_INTERVAL_MS) {
+      return
+    }
+    lastActivityWrittenAt = now
+    setStorageValue(SESSION_ACTIVITY_KEY, now)
   }
 
   function checkSessionTimeout() {
@@ -93,7 +123,7 @@ export const useUserStore = defineStore('user', () => {
   function startSessionMonitor() {
     stopSessionMonitor()
     // 立即记录活动时间
-    recordActivity()
+    recordActivity(true)
     // 每分钟检测一次
     sessionCheckTimer = setInterval(checkSessionTimeout, SESSION_CHECK_INTERVAL_MS)
   }
@@ -107,6 +137,7 @@ export const useUserStore = defineStore('user', () => {
 
   function logout(isSessionExpired = false) {
     stopSessionMonitor()
+    lastActivityWrittenAt = 0
     token.value = ''
     userId.value = null
     username.value = ''

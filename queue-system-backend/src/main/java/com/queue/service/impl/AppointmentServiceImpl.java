@@ -10,6 +10,8 @@ import com.queue.entity.BusinessType;
 import com.queue.mapper.AppointmentMapper;
 import com.queue.mapper.BusinessTypeMapper;
 import com.queue.service.AppointmentService;
+import com.queue.service.PhoneCryptoService;
+import com.queue.util.PhoneUtil;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -23,10 +25,14 @@ public class AppointmentServiceImpl implements AppointmentService {
 
     private final AppointmentMapper appointmentMapper;
     private final BusinessTypeMapper businessTypeMapper;
+    private final PhoneCryptoService phoneCryptoService;
 
-    public AppointmentServiceImpl(AppointmentMapper appointmentMapper, BusinessTypeMapper businessTypeMapper) {
+    public AppointmentServiceImpl(AppointmentMapper appointmentMapper,
+                                  BusinessTypeMapper businessTypeMapper,
+                                  PhoneCryptoService phoneCryptoService) {
         this.appointmentMapper = appointmentMapper;
         this.businessTypeMapper = businessTypeMapper;
+        this.phoneCryptoService = phoneCryptoService;
     }
 
     @Override
@@ -37,6 +43,20 @@ public class AppointmentServiceImpl implements AppointmentService {
         }
         if (request.getAppointmentDate() != null) {
             wrapper.eq("appointment_date", request.getAppointmentDate());
+        }
+        if (request.getPhone() != null && !request.getPhone().isBlank()) {
+            if (PhoneUtil.looksLikeCompletePhone(request.getPhone())) {
+                String phoneHash = phoneCryptoService.hash(request.getPhone());
+                String maskedPhone = PhoneUtil.mask(request.getPhone());
+                wrapper.and(w -> w.eq("phone_hash", phoneHash)
+                        .or()
+                        .isNull("phone_hash")
+                        .eq("phone", maskedPhone));
+            } else if (request.getPhone().matches("\\d{4}")) {
+                wrapper.eq("phone_last4", request.getPhone());
+            } else {
+                wrapper.like("phone_masked", request.getPhone());
+            }
         }
         wrapper.orderByDesc("created_at");
 
@@ -54,10 +74,16 @@ public class AppointmentServiceImpl implements AppointmentService {
 
         // 生成预约编号
         String appointmentNo = generateAppointmentNo(bt.getPrefix());
+        PhoneCryptoService.ProtectedPhone protectedPhone = phoneCryptoService.protect(request.getPhone());
 
         Appointment appointment = new Appointment();
         appointment.setBusinessTypeId(request.getBusinessTypeId());
-        appointment.setPhone(request.getPhone());
+        appointment.setPhone(protectedPhone.masked());
+        appointment.setPhoneCiphertext(protectedPhone.ciphertext());
+        appointment.setPhoneHash(protectedPhone.hash());
+        appointment.setPhoneMasked(protectedPhone.masked());
+        appointment.setPhoneLast4(protectedPhone.last4());
+        appointment.setPhoneKeyVersion(protectedPhone.keyVersion());
         appointment.setName(request.getName());
         appointment.setDate(request.getAppointmentDate());
         appointment.setTimeSlot(request.getTimeSlot());
@@ -90,7 +116,7 @@ public class AppointmentServiceImpl implements AppointmentService {
     private AppointmentResponse convertToResponse(Appointment appointment) {
         AppointmentResponse response = new AppointmentResponse();
         response.setId(appointment.getId());
-        response.setPhone(appointment.getPhone());
+        response.setPhone(appointment.getPhoneMasked() != null ? appointment.getPhoneMasked() : appointment.getPhone());
         response.setName(appointment.getName());
         response.setAppointmentDate(appointment.getDate() != null ?
             appointment.getDate().toString() : null);

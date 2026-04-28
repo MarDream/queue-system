@@ -456,8 +456,7 @@ function removeLogo() {
 // === API ===
 async function fetchRegions() {
   try {
-    const params = { userId: Number(userStore.userId) || undefined }
-    regions.value = await request.get('/regions', { params })
+    regions.value = await request.get('/regions')
     if (!userStore.isSuperAdmin && regions.value.length > 0) {
       const userRegion = regions.value.find(r => r.code === userStore.regionCode)
       if (userRegion) {
@@ -477,10 +476,9 @@ async function generateQr() {
       ElMessage.error('未找到区域代码')
       return
     }
-    const res = await request.get('/qrcode/url', {
+    const res = await request.get('/admin/qrcode/url', {
       params: {
         regionCode: region.code,
-        userId: Number(userStore.userId) || undefined,
         baseUrl: window.location.origin
       }
     })
@@ -495,7 +493,7 @@ async function generateQr() {
       canvasRef: null
     }
 
-    qrList.value = qrList.value.filter(item => item.regionName !== res.regionName)
+    qrList.value = qrList.value.filter(item => item.regionId !== res.regionId)
     qrList.value.unshift(qrItem)
 
     await nextTick()
@@ -510,7 +508,7 @@ async function generateQr() {
 
 async function loadQrList() {
   try {
-    const list = await request.get('/qrcode/list', { params: { userId: Number(userStore.userId) || undefined } })
+    const list = await request.get('/admin/qrcode/list')
     qrList.value = list.map(item => ({
       id: item.id,
       regionId: item.regionId,
@@ -531,7 +529,7 @@ async function loadQrList() {
 
 async function removeQr(id) {
   try {
-    await request.delete(`/qrcode/${id}`)
+    await request.delete(`/admin/qrcode/${id}`)
     qrList.value = qrList.value.filter(item => item.id !== id)
     printSelected.value = printSelected.value.filter(pid => pid !== id)
     ElMessage.success('已删除')
@@ -545,7 +543,7 @@ async function batchRemoveQr() {
   if (!ids.length) return
   try {
     await ElMessageBox.confirm(`确定删除选中的 ${ids.length} 个二维码？`, '批量删除', { type: 'warning' })
-    await request.delete('/qrcode/batch', { data: { ids } })
+    await request.delete('/admin/qrcode/batch', { data: { ids } })
     qrList.value = qrList.value.filter(item => !ids.includes(item.id))
     printSelected.value = []
     ElMessage.success(`已删除 ${ids.length} 个二维码`)
@@ -615,13 +613,13 @@ async function batchGenerate() {
     }
 
     try {
-      const res = await request.get('/qrcode/url', {
+      const res = await request.get('/admin/qrcode/url', {
         params: {
           regionCode: region.code,
-          userId: Number(userStore.userId) || undefined,
           baseUrl: window.location.origin
         }
       })
+      qrList.value = qrList.value.filter(item => item.regionId !== res.regionId)
       qrList.value.unshift({
         id: res.id,
         regionId: res.regionId,

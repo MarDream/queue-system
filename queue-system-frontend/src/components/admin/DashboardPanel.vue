@@ -275,7 +275,7 @@
               <td>{{ row.name || '—' }}</td>
               <td>{{ row.phone || '—' }}</td>
               <td>
-                <span class="status-tag" :class="'status-' + row.status">
+                <span class="status-tag" :class="'status-' + normalizeStatus(row.status)">
                   <span class="status-dot"></span>
                   {{ statusTextCn(row.status) }}
                 </span>
@@ -296,10 +296,8 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { Search, Refresh } from '@element-plus/icons-vue'
 import { getDashboard, getTicketList, getBusinessTypeDetail } from '../../api/screen'
-import { useUserStore } from '../../stores/user'
 import { getDisplayTicketNo } from '../../utils/ticketUtils'
-
-const userStore = useUserStore()
+import { getTicketStatusText, normalizeTicketStatus } from '../../utils/status'
 
 const data = ref({})
 const dialogVisible = ref(false)
@@ -391,7 +389,7 @@ function bizColor(idx) {
 }
 
 onMounted(async () => {
-  try { data.value = await getDashboard({ userId: Number(userStore.userId) || undefined }) }
+  try { data.value = await getDashboard() }
   catch {}
 })
 
@@ -418,7 +416,7 @@ async function openBizDetail(item) {
   bizLoading.value = true
   bizDetailList.value = []
   try {
-    bizDetailList.value = await getBusinessTypeDetail(item.businessTypeId, { userId: Number(userStore.userId) || undefined })
+    bizDetailList.value = await getBusinessTypeDetail(item.businessTypeId)
   } catch {
     bizDetailList.value = []
   } finally {
@@ -437,10 +435,10 @@ async function openDetail(type) {
     dialogStatus.value = ''
   } else if (type === 'completed') {
     dialogTitle.value = '已办结详情'
-    dialogStatus.value = 'COMPLETED'
+    dialogStatus.value = 'completed'
   } else if (type === 'waiting') {
     dialogTitle.value = '当前等待详情'
-    dialogStatus.value = 'WAITING'
+    dialogStatus.value = 'waiting'
   }
   await doFetch()
   dialogLoading.value = false
@@ -453,7 +451,7 @@ async function doSearch() {
 }
 
 async function doFetch() {
-  const params = { userId: Number(userStore.userId) || undefined }
+  const params = {}
   if (dialogStatus.value) params.status = dialogStatus.value
   if (filter.value.dateRange && filter.value.dateRange.length === 2) {
     params.startDate = filter.value.dateRange[0]
@@ -471,30 +469,12 @@ function resetFilter() {
   filter.value = { dateRange: [], phone: '', name: '', ticketNo: '' }
 }
 
-function statusTagType(status) {
-  const key = status?.toUpperCase?.()
-  const map = {
-    WAITING: 'warning',
-    CALLED: 'primary',
-    SERVING: 'success',
-    COMPLETED: 'info',
-    CANCELLED: 'danger',
-    SKIPPED: 'warning'
-  }
-  return map[key] || 'info'
+function normalizeStatus(status) {
+  return normalizeTicketStatus(status)
 }
 
-const STATUS_TEXT_CN = {
-  WAITING: '等待中',
-  CALLED: '已叫号',
-  SERVING: '服务中',
-  COMPLETED: '已完成',
-  CANCELLED: '已取消',
-  SKIPPED: '已跳过'
-}
 function statusTextCn(status) {
-  const key = status?.toUpperCase?.()
-  return STATUS_TEXT_CN[key] || status || '—'
+  return getTicketStatusText(status)
 }
 
 function formatTime(time) {
@@ -870,18 +850,18 @@ function formatTime(time) {
   border: 1px solid;
 }
 .status-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
-.status-WAITING   { background: rgba(255,152,0,0.1);  color: #ff9800; border-color: rgba(255,152,0,0.25); }
-.status-WAITING  .status-dot { background: #ff9800; box-shadow: 0 0 4px #ff9800; }
-.status-CALLED    { background: rgba(0,82,217,0.12);  color: #0052d9; border-color: rgba(0,82,217,0.22); }
-.status-CALLED   .status-dot { background: #0052d9; box-shadow: 0 0 4px #0052d9; }
-.status-SERVING   { background: rgba(0,230,118,0.1);  color: #00e676; border-color: rgba(0,230,118,0.25); }
-.status-SERVING  .status-dot { background: #00e676; box-shadow: 0 0 4px #00e676; animation: pulse-dot 1.4s ease infinite; }
-.status-COMPLETED { background: rgba(74,85,104,0.15); color: #8892a4; border-color: rgba(74,85,104,0.3); }
-.status-COMPLETED .status-dot { background: #8892a4; }
-.status-CANCELLED { background: rgba(244,67,54,0.1);  color: #f44336; border-color: rgba(244,67,54,0.25); }
-.status-CANCELLED .status-dot { background: #f44336; }
-.status-SKIPPED   { background: rgba(156,39,176,0.1);  color: #ce93d8; border-color: rgba(156,39,176,0.25); }
-.status-SKIPPED   .status-dot { background: #ce93d8; }
+.status-waiting   { background: rgba(255,152,0,0.1);  color: #ff9800; border-color: rgba(255,152,0,0.25); }
+.status-waiting  .status-dot { background: #ff9800; box-shadow: 0 0 4px #ff9800; }
+.status-called    { background: rgba(0,82,217,0.12);  color: #0052d9; border-color: rgba(0,82,217,0.22); }
+.status-called   .status-dot { background: #0052d9; box-shadow: 0 0 4px #0052d9; }
+.status-serving   { background: rgba(0,230,118,0.1);  color: #00e676; border-color: rgba(0,230,118,0.25); }
+.status-serving  .status-dot { background: #00e676; box-shadow: 0 0 4px #00e676; animation: pulse-dot 1.4s ease infinite; }
+.status-completed { background: rgba(74,85,104,0.15); color: #8892a4; border-color: rgba(74,85,104,0.3); }
+.status-completed .status-dot { background: #8892a4; }
+.status-cancelled { background: rgba(244,67,54,0.1);  color: #f44336; border-color: rgba(244,67,54,0.25); }
+.status-cancelled .status-dot { background: #f44336; }
+.status-skipped   { background: rgba(156,39,176,0.1);  color: #ce93d8; border-color: rgba(156,39,176,0.25); }
+.status-skipped   .status-dot { background: #ce93d8; }
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }

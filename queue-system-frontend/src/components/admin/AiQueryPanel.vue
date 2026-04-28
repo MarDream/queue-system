@@ -295,9 +295,7 @@ async function loadOptions() {
   if (props.workspace !== 'admin') return
   loadingOptions.value = true
   try {
-    const rawUserId = localStorage.getItem('userId')
-    const uid = rawUserId ? Number(rawUserId) : undefined
-    const res: any = await request.get('/regions', { params: uid ? { userId: uid } : undefined })
+    const res: any = await request.get('/regions')
     regions.value = Array.isArray(res) ? (res as RegionOption[]) : []
     if (selectedRegionId.value == null && props.regionId != null) {
       selectedRegionId.value = props.regionId

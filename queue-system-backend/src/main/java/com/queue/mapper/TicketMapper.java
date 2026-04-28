@@ -1,10 +1,14 @@
 package com.queue.mapper;
 
-import org.apache.ibatis.annotations.Select;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.queue.entity.Ticket;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
+
+import java.time.LocalDateTime;
+import java.util.List;
 
 @Mapper
 public interface TicketMapper extends BaseMapper<Ticket> {
@@ -13,4 +17,15 @@ public interface TicketMapper extends BaseMapper<Ticket> {
 
     @Select("SELECT COALESCE(MAX(CAST(SUBSTRING(ticket_no, 7) AS UNSIGNED)), 0) FROM ticket WHERE region_id = #{regionId} AND business_type_id = #{businessTypeId} AND DATE(created_at) = CURDATE()")
     Long selectMaxSequenceByRegionAndBusinessTypeId(@Param("regionId") Long regionId, @Param("businessTypeId") Long businessTypeId);
+
+    @Select("SELECT id, region_id, business_type_id FROM ticket WHERE deleted = 0 AND status = 'waiting' AND created_at < #{cutoff}")
+    List<Ticket> selectExpiredWaitingTickets(@Param("cutoff") LocalDateTime cutoff);
+
+    @Select("SELECT id FROM ticket WHERE deleted = 0 AND counter_id IS NOT NULL AND status IN ('waiting', 'called', 'serving') AND created_at < #{cutoff}")
+    List<Long> selectExpiredAssignedTicketIds(@Param("cutoff") LocalDateTime cutoff);
+
+    @Update("UPDATE ticket " +
+            "SET status = 'skipped', skip_type = 'system', updated_at = NOW() " +
+            "WHERE deleted = 0 AND status IN ('waiting', 'called', 'serving') AND created_at < #{cutoff}")
+    int markExpiredTicketsBefore(@Param("cutoff") LocalDateTime cutoff);
 }

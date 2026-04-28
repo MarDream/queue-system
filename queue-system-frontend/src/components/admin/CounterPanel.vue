@@ -358,10 +358,7 @@ import { Plus, Edit, Delete, Search, RefreshRight, Refresh } from '@element-plus
 import { StatusBadge } from './index.js'
 import request from '../../api/index'
 import { counterApi } from '../../api/admin'
-import { useUserStore } from '../../stores/user'
 import { getDisplayTicketNo } from '../../utils/ticketUtils'
-
-const userStore = useUserStore()
 
 const list = ref([])
 const regions = ref([])
@@ -427,6 +424,7 @@ const selectedRows = ref([])
 const stats = ref({})
 const statsLoading = ref(false)
 let pollingTimer = null
+let statsFetchInFlight = false
 
 const detailVisible = ref(false)
 const formVisible = ref(false)
@@ -562,11 +560,7 @@ const kpi = computed(() => {
 async function fetchList() {
   loading.value = true
   try {
-    const params = {}
-    if (!userStore.isSuperAdmin) {
-      params.userId = Number(userStore.userId) || undefined
-    }
-    list.value = await counterApi.list(params)
+    list.value = await counterApi.list()
     await syncTableSelection()
     if (detailVisible.value && selectedId.value) fetchStats(selectedId.value)
   } catch { list.value = [] }
@@ -575,15 +569,13 @@ async function fetchList() {
 
 async function fetchRegions() {
   try {
-    const params = {}
-    if (!userStore.isSuperAdmin) {
-      params.userId = Number(userStore.userId) || undefined
-    }
-    regions.value = await request.get('/regions', { params })
+    regions.value = await request.get('/regions')
   } catch {}
 }
 
 async function fetchStats(counterId) {
+  if (!counterId || statsFetchInFlight) return
+  statsFetchInFlight = true
   statsLoading.value = true
   try {
     stats.value = await counterApi.getStats(counterId)
@@ -591,16 +583,18 @@ async function fetchStats(counterId) {
     stats.value = {}
   } finally {
     statsLoading.value = false
+    statsFetchInFlight = false
   }
 }
 
 function startPolling() {
+  if (document.hidden || !detailVisible.value || !selectedId.value) return
   stopPolling()
   pollingTimer = setInterval(() => {
-    if (detailVisible.value && selectedId.value) {
+    if (!document.hidden && detailVisible.value && selectedId.value) {
       fetchStats(selectedId.value)
     }
-  }, 5000)
+  }, 10000)
 }
 
 function stopPolling() {
@@ -825,6 +819,17 @@ function closeDetail() {
   stats.value = {}
 }
 
+function handleVisibilityChange() {
+  if (document.hidden) {
+    stopPolling()
+    return
+  }
+  if (detailVisible.value && selectedId.value) {
+    fetchStats(selectedId.value)
+    startPolling()
+  }
+}
+
 function onRowClick(row, column) {
   if (column && column.type === 'selection') return
   selectedId.value = row.id
@@ -840,6 +845,7 @@ function displayBusinessTags(businessTypes) {
 onMounted(() => {
   fetchList()
   fetchRegions()
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   if (typeof ResizeObserver !== 'undefined') {
     tableResizeObserver = new ResizeObserver((entries) => {
       const entry = entries && entries[0]
@@ -852,6 +858,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopPolling()
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   if (tableResizeObserver) {
     tableResizeObserver.disconnect()
     tableResizeObserver = null

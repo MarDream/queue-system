@@ -5,6 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Data
@@ -26,4 +27,7 @@ public class StatisticsRequest {
     private String status;
     // 过号来源类型筛选 (manual/system)
     private String skipType;
+    // 归一化后的时间范围，供 SQL 直接走索引
+    private LocalDateTime createdAtStart;
+    private LocalDateTime createdAtEndExclusive;
 }

@@ -1,5 +1,7 @@
 package com.queue.runner;
 
+import com.queue.service.PhoneCryptoService;
+import com.queue.util.PhoneUtil;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
@@ -10,7 +12,9 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.stream.Collectors;
 
@@ -18,9 +22,11 @@ import java.util.stream.Collectors;
 public class SchemaInitRunner implements CommandLineRunner {
 
     private final DataSource dataSource;
+    private final PhoneCryptoService phoneCryptoService;
 
-    public SchemaInitRunner(DataSource dataSource) {
+    public SchemaInitRunner(DataSource dataSource, PhoneCryptoService phoneCryptoService) {
         this.dataSource = dataSource;
+        this.phoneCryptoService = phoneCryptoService;
     }
 
     @Override
@@ -70,6 +76,12 @@ public class SchemaInitRunner implements CommandLineRunner {
 
             // 迁移：添加 reactivated_at 字段
             migrateReactivatedAt(conn);
+
+            // 迁移：补齐手机号保护字段
+            migrateProtectedPhoneColumns(conn);
+
+            // 迁移：补齐热路径查询索引
+            migratePerformanceIndexes(conn);
 
             // 迁移：添加智能问数菜单（仅超级管理员）
             migrateAiMenu(conn);
@@ -205,5 +217,167 @@ public class SchemaInitRunner implements CommandLineRunner {
         } catch (Exception e) {
             System.err.println("智能问数菜单迁移失败: " + e.getMessage());
         }
+    }
+
+    private void migrateProtectedPhoneColumns(Connection conn) {
+        try {
+            ensurePhoneColumns(conn, "ticket");
+            ensurePhoneColumns(conn, "appointment");
+            ensureIndex(conn, "ticket", "idx_ticket_phone_hash_type_created",
+                    "CREATE INDEX idx_ticket_phone_hash_type_created ON ticket (phone_hash, business_type_id, created_at)");
+            ensureIndex(conn, "ticket", "idx_ticket_phone_last4_created",
+                    "CREATE INDEX idx_ticket_phone_last4_created ON ticket (phone_last4, created_at)");
+            ensureIndex(conn, "appointment", "idx_appointment_phone_hash_date",
+                    "CREATE INDEX idx_appointment_phone_hash_date ON appointment (phone_hash, appointment_date)");
+            ensureIndex(conn, "appointment", "idx_appointment_phone_last4_date",
+                    "CREATE INDEX idx_appointment_phone_last4_date ON appointment (phone_last4, appointment_date)");
+
+            backfillProtectedPhones(conn, "ticket");
+            backfillProtectedPhones(conn, "appointment");
+        } catch (Exception e) {
+            System.err.println("手机号保护字段迁移失败: " + e.getMessage());
+        }
+    }
+
+    private void migratePerformanceIndexes(Connection conn) {
+        try {
+            ensureIndex(conn, "ticket", "idx_ticket_region_status_created",
+                    "CREATE INDEX idx_ticket_region_status_created ON ticket (region_id, status, created_at)");
+            ensureIndex(conn, "ticket", "idx_ticket_region_business_created",
+                    "CREATE INDEX idx_ticket_region_business_created ON ticket (region_id, business_type_id, created_at)");
+            ensureIndex(conn, "ticket", "idx_ticket_counter_created",
+                    "CREATE INDEX idx_ticket_counter_created ON ticket (counter_id, created_at)");
+            ensureIndex(conn, "ticket", "idx_ticket_status_created_counter",
+                    "CREATE INDEX idx_ticket_status_created_counter ON ticket (status, created_at, counter_id)");
+        } catch (Exception e) {
+            System.err.println("热路径索引迁移失败: " + e.getMessage());
+        }
+    }
+
+    private void ensurePhoneColumns(Connection conn, String tableName) throws SQLException {
+        ensureColumn(conn, tableName, "phone_ciphertext",
+                "ALTER TABLE " + tableName + " ADD COLUMN phone_ciphertext VARCHAR(512) COMMENT '手机号密文（AES-GCM）'");
+        ensureColumn(conn, tableName, "phone_hash",
+                "ALTER TABLE " + tableName + " ADD COLUMN phone_hash CHAR(64) COMMENT '手机号哈希（SHA-256）'");
+        ensureColumn(conn, tableName, "phone_masked",
+                "ALTER TABLE " + tableName + " ADD COLUMN phone_masked VARCHAR(20) COMMENT '手机号脱敏值'");
+        ensureColumn(conn, tableName, "phone_last4",
+                "ALTER TABLE " + tableName + " ADD COLUMN phone_last4 VARCHAR(4) COMMENT '手机号后4位'");
+        ensureColumn(conn, tableName, "phone_key_version",
+                "ALTER TABLE " + tableName + " ADD COLUMN phone_key_version INT DEFAULT 1 COMMENT '手机号加密密钥版本'");
+    }
+
+    private void ensureColumn(Connection conn, String tableName, String columnName, String alterSql) throws SQLException {
+        if (columnExists(conn, tableName, columnName)) {
+            return;
+        }
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute(alterSql);
+            System.out.println(tableName + "." + columnName + " 字段添加成功");
+        }
+    }
+
+    private boolean columnExists(Connection conn, String tableName, String columnName) throws SQLException {
+        DatabaseMetaData metaData = conn.getMetaData();
+        try (ResultSet columns = metaData.getColumns(null, null, tableName, columnName)) {
+            return columns.next();
+        }
+    }
+
+    private void ensureIndex(Connection conn, String tableName, String indexName, String createSql) throws SQLException {
+        DatabaseMetaData metaData = conn.getMetaData();
+        try (ResultSet indexes = metaData.getIndexInfo(null, null, tableName, false, false)) {
+            while (indexes.next()) {
+                String existingIndex = indexes.getString("INDEX_NAME");
+                if (indexName.equalsIgnoreCase(existingIndex)) {
+                    return;
+                }
+            }
+        }
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute(createSql);
+            System.out.println(tableName + "." + indexName + " 索引添加成功");
+        }
+    }
+
+    private void backfillProtectedPhones(Connection conn, String tableName) throws SQLException {
+        String selectSql = """
+                SELECT id, phone, phone_ciphertext, phone_hash, phone_masked, phone_last4, phone_key_version
+                FROM %s
+                WHERE phone IS NOT NULL
+                  AND (
+                      phone_ciphertext IS NULL
+                      OR phone_hash IS NULL
+                      OR phone_masked IS NULL
+                      OR phone_last4 IS NULL
+                      OR phone_key_version IS NULL
+                  )
+                """.formatted(tableName);
+        String updateSql = """
+                UPDATE %s
+                SET phone = ?,
+                    phone_ciphertext = ?,
+                    phone_hash = ?,
+                    phone_masked = ?,
+                    phone_last4 = ?,
+                    phone_key_version = ?
+                WHERE id = ?
+                """.formatted(tableName);
+
+        try (PreparedStatement selectStmt = conn.prepareStatement(selectSql);
+             ResultSet resultSet = selectStmt.executeQuery();
+             PreparedStatement updateStmt = conn.prepareStatement(updateSql)) {
+
+            int migrated = 0;
+            while (resultSet.next()) {
+                Long id = resultSet.getLong("id");
+                String storedPhone = resultSet.getString("phone");
+                String phoneCiphertext = resultSet.getString("phone_ciphertext");
+                String phoneHash = resultSet.getString("phone_hash");
+                String phoneMasked = resultSet.getString("phone_masked");
+                String phoneLast4 = resultSet.getString("phone_last4");
+                Integer phoneKeyVersion = resultSet.getObject("phone_key_version", Integer.class);
+
+                if (storedPhone == null || storedPhone.isBlank()) {
+                    continue;
+                }
+
+                boolean looksMasked = storedPhone.contains("*");
+                PhoneCryptoService.ProtectedPhone protectedPhone = looksMasked ? null : phoneCryptoService.protect(storedPhone);
+
+                String nextMasked = firstNonBlank(phoneMasked,
+                        protectedPhone != null ? protectedPhone.masked() : PhoneUtil.mask(storedPhone));
+                String nextLast4 = firstNonBlank(phoneLast4,
+                        protectedPhone != null ? protectedPhone.last4() : PhoneUtil.extractLast4(storedPhone));
+                String nextCiphertext = firstNonBlank(phoneCiphertext,
+                        protectedPhone != null ? protectedPhone.ciphertext() : null);
+                String nextHash = firstNonBlank(phoneHash,
+                        protectedPhone != null ? protectedPhone.hash() : null);
+                Integer nextKeyVersion = phoneKeyVersion != null
+                        ? phoneKeyVersion
+                        : protectedPhone != null ? protectedPhone.keyVersion() : phoneCryptoService.keyVersionValue();
+                String nextStoredPhone = firstNonBlank(nextMasked, storedPhone);
+
+                updateStmt.setString(1, nextStoredPhone);
+                updateStmt.setString(2, nextCiphertext);
+                updateStmt.setString(3, nextHash);
+                updateStmt.setString(4, nextMasked);
+                updateStmt.setString(5, nextLast4);
+                updateStmt.setInt(6, nextKeyVersion);
+                updateStmt.setLong(7, id);
+                migrated += updateStmt.executeUpdate();
+            }
+
+            if (migrated > 0) {
+                System.out.println(tableName + " 手机号保护字段回填完成，共更新 " + migrated + " 条");
+            }
+        }
+    }
+
+    private String firstNonBlank(String primary, String fallback) {
+        if (primary != null && !primary.isBlank()) {
+            return primary;
+        }
+        return fallback;
     }
 }

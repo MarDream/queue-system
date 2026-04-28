@@ -16,6 +16,11 @@ public class Ticket {
     private Long businessTypeId;
     private String source;
     private String phone;
+    private String phoneCiphertext;
+    private String phoneHash;
+    private String phoneMasked;
+    private String phoneLast4;
+    private Integer phoneKeyVersion;
     private String name;
     private String status;
     private Long counterId;

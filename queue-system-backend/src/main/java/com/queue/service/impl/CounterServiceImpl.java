@@ -56,6 +56,7 @@ public class CounterServiceImpl implements CounterService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public CounterCallResponse callNext(Long counterId) {
         String lockKey = "call:" + counterId;
         if (!queueService.acquireLock(lockKey, 5)) {
@@ -64,7 +65,7 @@ public class CounterServiceImpl implements CounterService {
         try {
             Counter counter = counterMapper.selectById(counterId);
             if (counter == null) throw new BusinessException(ResultCode.COUNTER_NOT_OPERABLE);
-            if (CounterStatus.PAUSED.getValue().equals(counter.getStatus())) {
+            if (!CounterStatus.IDLE.getValue().equals(counter.getStatus()) || counter.getCurrentTicketId() != null) {
                 throw new BusinessException(ResultCode.COUNTER_NOT_OPERABLE);
             }
 
@@ -81,14 +82,41 @@ public class CounterServiceImpl implements CounterService {
 
             // 从数据库查询当前窗口支持业务类型中最早的等待票
             // 排序优先级：被激活的票优先（按激活时间排序），普通票按创建时间排序
-            QueryWrapper<Ticket> wrapper = new QueryWrapper<>();
-            wrapper.in("business_type_id", businessTypeIds)
-                   .in("region_id", regionIds)
-                   .eq("status", TicketStatus.WAITING.getValue())
-                   .ge("created_at", startOfDay)
-                   .lt("created_at", endOfDay)
-                   .last("ORDER BY IF(reactivated_at IS NULL, 1, 0) ASC, reactivated_at ASC, created_at ASC LIMIT 1");
-            Ticket bestTicket = ticketMapper.selectOne(wrapper);
+            Ticket bestTicket = null;
+            LocalDateTime calledAt = null;
+            for (int attempt = 0; attempt < 5; attempt++) {
+                QueryWrapper<Ticket> wrapper = new QueryWrapper<>();
+                wrapper.in("business_type_id", businessTypeIds)
+                       .in("region_id", regionIds)
+                       .eq("status", TicketStatus.WAITING.getValue())
+                       .ge("created_at", startOfDay)
+                       .lt("created_at", endOfDay)
+                       .last("ORDER BY IF(reactivated_at IS NULL, 1, 0) ASC, reactivated_at ASC, created_at ASC LIMIT 1");
+                Ticket candidate = ticketMapper.selectOne(wrapper);
+                if (candidate == null) {
+                    break;
+                }
+
+                calledAt = LocalDateTime.now();
+                Ticket update = new Ticket();
+                update.setStatus(TicketStatus.CALLED.getValue());
+                update.setCounterId(counterId);
+                update.setCalledAt(calledAt);
+                int updated = ticketMapper.update(
+                        update,
+                        new QueryWrapper<Ticket>()
+                                .eq("id", candidate.getId())
+                                .eq("status", TicketStatus.WAITING.getValue())
+                                .isNull("counter_id")
+                );
+                if (updated == 1) {
+                    candidate.setStatus(TicketStatus.CALLED.getValue());
+                    candidate.setCounterId(counterId);
+                    candidate.setCalledAt(calledAt);
+                    bestTicket = candidate;
+                    break;
+                }
+            }
 
             if (bestTicket == null) {
                 return null;
@@ -97,11 +125,6 @@ public class CounterServiceImpl implements CounterService {
             // 使用票自身的regionId进行Redis操作
             queueService.dequeue(bestTicket.getRegionId(), bestTicket.getBusinessTypeId(), bestTicket.getId());
             queueService.decrementWaitingCount(bestTicket.getRegionId(), bestTicket.getBusinessTypeId());
-
-            bestTicket.setStatus(TicketStatus.CALLED.getValue());
-            bestTicket.setCounterId(counterId);
-            bestTicket.setCalledAt(LocalDateTime.now());
-            ticketMapper.updateById(bestTicket);
 
             counter.setStatus(CounterStatus.BUSY.getValue());
             counter.setCurrentTicketId(bestTicket.getId());

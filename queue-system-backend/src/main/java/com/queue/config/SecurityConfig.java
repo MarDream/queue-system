@@ -47,7 +47,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/regions", "/api/v1/regions/**").authenticated()
                 .requestMatchers("/api/v1/ticket/**").permitAll()
                 .requestMatchers("/api/v1/queue/**").permitAll()
-                .requestMatchers("/api/v1/qrcode/**").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/v1/qrcode/generate").permitAll()
                 // Admin stats endpoint - read-only, no side effects
                 .requestMatchers(HttpMethod.GET, "/api/v1/admin/counters/*/stats").permitAll()
                 // Admin endpoints require auth

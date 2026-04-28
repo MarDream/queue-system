@@ -24,3 +24,8 @@ queue:
   config:
     avg-service-minutes: 3
     ticket-number-padding: 3
+
+app:
+  phone-encryption:
+    master-key: YOUR_PHONE_ENCRYPTION_KEY_HERE
+    key-version: 1

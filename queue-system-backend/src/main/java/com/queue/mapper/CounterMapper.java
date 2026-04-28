@@ -5,6 +5,9 @@ import com.queue.entity.Counter;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Update;
+
+import java.util.List;
 
 @Mapper
 public interface CounterMapper extends BaseMapper<Counter> {
@@ -14,4 +17,12 @@ public interface CounterMapper extends BaseMapper<Counter> {
      */
     @Delete("DELETE FROM counter WHERE id = #{id}")
     int physicalDeleteById(@Param("id") Long id);
+
+    @Update("<script>" +
+            "UPDATE counter " +
+            "SET status = 'idle', current_ticket_id = NULL " +
+            "WHERE current_ticket_id IN " +
+            "<foreach collection='ticketIds' item='ticketId' open='(' separator=',' close=')'>#{ticketId}</foreach>" +
+            "</script>")
+    int resetCurrentAssignments(@Param("ticketIds") List<Long> ticketIds);
 }

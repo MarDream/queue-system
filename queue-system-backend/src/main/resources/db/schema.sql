@@ -144,6 +144,11 @@ CREATE TABLE IF NOT EXISTS `ticket` (
     `business_type_id` BIGINT NOT NULL COMMENT '业务类型ID',
     `source` VARCHAR(20) DEFAULT 'online' COMMENT '来源：online=扫码取号，appointment=预约，manual=管理员代录',
     `phone` VARCHAR(20) COMMENT '手机号码（脱敏后）',
+    `phone_ciphertext` VARCHAR(512) COMMENT '手机号密文（AES-GCM）',
+    `phone_hash` CHAR(64) COMMENT '手机号哈希（SHA-256）',
+    `phone_masked` VARCHAR(20) COMMENT '手机号脱敏值',
+    `phone_last4` VARCHAR(4) COMMENT '手机号后4位',
+    `phone_key_version` INT DEFAULT 1 COMMENT '手机号加密密钥版本',
     `name` VARCHAR(50) COMMENT '客户姓名',
     `status` VARCHAR(20) DEFAULT 'waiting' COMMENT '状态：waiting=等待中，called=已叫号，serving=服务中，completed=已完成，skipped=已跳过，cancelled=已取消',
     `counter_id` BIGINT COMMENT '分配的窗口ID',
@@ -159,22 +164,35 @@ CREATE TABLE IF NOT EXISTS `ticket` (
     UNIQUE KEY `uk_ticket_no` (`ticket_no`),
     INDEX `idx_region` (`region_id`),
     INDEX `idx_ticket_phone_type_status` (`phone`, `business_type_id`, `status`),
+    INDEX `idx_ticket_phone_hash_type_created` (`phone_hash`, `business_type_id`, `created_at`),
+    INDEX `idx_ticket_phone_last4_created` (`phone_last4`, `created_at`),
     INDEX `idx_ticket_status_type` (`status`, `business_type_id`),
-    INDEX `idx_ticket_created_at` (`created_at`)
+    INDEX `idx_ticket_created_at` (`created_at`),
+    INDEX `idx_ticket_region_status_created` (`region_id`, `status`, `created_at`),
+    INDEX `idx_ticket_region_business_created` (`region_id`, `business_type_id`, `created_at`),
+    INDEX `idx_ticket_counter_created` (`counter_id`, `created_at`),
+    INDEX `idx_ticket_status_created_counter` (`status`, `created_at`, `counter_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='排队票号表';
 
 -- 预约表
 CREATE TABLE IF NOT EXISTS `appointment` (
     `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
     `business_type_id` BIGINT NOT NULL COMMENT '业务类型ID',
-    `phone` VARCHAR(20) COMMENT '手机号码',
+    `phone` VARCHAR(20) COMMENT '手机号码（脱敏后）',
+    `phone_ciphertext` VARCHAR(512) COMMENT '手机号密文（AES-GCM）',
+    `phone_hash` CHAR(64) COMMENT '手机号哈希（SHA-256）',
+    `phone_masked` VARCHAR(20) COMMENT '手机号脱敏值',
+    `phone_last4` VARCHAR(4) COMMENT '手机号后4位',
+    `phone_key_version` INT DEFAULT 1 COMMENT '手机号加密密钥版本',
     `name` VARCHAR(50) COMMENT '客户姓名',
     `appointment_date` DATE NOT NULL COMMENT '预约日期',
     `time_slot` VARCHAR(20) COMMENT '预约时段：morning=上午，afternoon=下午',
     `status` VARCHAR(20) COMMENT '状态：pending=待确认，confirmed=已确认，cancelled=已取消',
     `ticket_id` BIGINT COMMENT '关联的票号ID',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间'
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    INDEX `idx_appointment_phone_hash_date` (`phone_hash`, `appointment_date`),
+    INDEX `idx_appointment_phone_last4_date` (`phone_last4`, `appointment_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='预约表';
 
 -- 系统配置表

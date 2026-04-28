@@ -146,6 +146,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
 import { getDisplayTicketNo } from '../utils/ticketUtils'
+import { getTicketStatusText, isActiveTicketStatus, normalizeTicketStatus } from '../utils/status'
 
 const API_BASE = ''
 
@@ -244,10 +245,10 @@ async function checkActiveTicket() {
     if (res.data.code === 200) {
       const data = res.data.data
       if (data.hasActive) {
-        activeTicket.value = data
+        activeTicket.value = normalizeTrackingTicket(data)
         pageState.value = 'tracking'
-        // 等待中则轮询
-        if (data.status === 'WAITING') {
+        // 未办结状态持续轮询
+        if (isActiveTicketStatus(data.status)) {
           startRefreshTimer()
         }
       } else {
@@ -273,15 +274,14 @@ function goToTicketForm() {
 /** 切换到排队进度 */
 function goToTracking() {
   if (refreshTimer) clearInterval(refreshTimer)
-  activeTicket.value = {
+  activeTicket.value = normalizeTrackingTicket({
     ticketNo: ticketResult.value.ticketNo,
     businessTypeName: ticketResult.value.businessType,
-    status: 'WAITING',
-    statusText: '等待中',
+    status: 'waiting',
     waitingCount: ticketResult.value.waitingCount,
     estimatedWaitMinutes: ticketResult.value.estimatedWaitMinutes,
     createdAt: ticketResult.value.createdAt
-  }
+  })
   pageState.value = 'tracking'
   startRefreshTimer()
 }
@@ -293,8 +293,8 @@ async function refreshTracking() {
       params: { regionCode: regionCode.value, phone: phone.value }
     })
     if (res.data.code === 200 && res.data.data.hasActive) {
-      activeTicket.value = res.data.data
-      if (res.data.data.status !== 'WAITING' && refreshTimer) {
+      activeTicket.value = normalizeTrackingTicket(res.data.data)
+      if (!isActiveTicketStatus(res.data.data.status) && refreshTimer) {
         clearInterval(refreshTimer)
         refreshTimer = null
       }
@@ -313,6 +313,15 @@ function startRefreshTimer() {
   refreshTimer = setInterval(() => {
     refreshTracking()
   }, 10000) // 每10秒刷新
+}
+
+function normalizeTrackingTicket(ticket) {
+  const status = normalizeTicketStatus(ticket?.status)
+  return {
+    ...ticket,
+    status,
+    statusText: ticket?.statusText || getTicketStatusText(status)
+  }
 }
 
 async function takeTicket() {

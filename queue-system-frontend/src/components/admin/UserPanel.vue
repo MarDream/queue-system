@@ -486,11 +486,7 @@ async function fetchList() {
 
 async function fetchRegions() {
   try {
-    const params = {}
-    if (!userStore.isSuperAdmin && userStore.userId) {
-      params.userId = userStore.userId
-    }
-    regions.value = await request.get('/regions', { params })
+    regions.value = await request.get('/regions')
   } catch {
     regions.value = []
   }
