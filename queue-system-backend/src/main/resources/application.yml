@@ -24,6 +24,7 @@ spring:
       force-response: true
 
 app:
+  version: ${APP_VERSION:}
   ip:                  # 部署时手动指定，留空则自动获取本机IP
   frontend:
     port: 5173

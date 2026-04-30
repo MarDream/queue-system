@@ -93,7 +93,8 @@
         <div class="brand-meta">
           <span class="pill">安全登录</span>
           <span class="pill">多角色</span>
-          <span class="pill">v1.0.0</span>
+          <span class="pill">版本 {{ displayVersion }}</span>
+          <span v-if="versionMismatch" class="pill pill-warning">前端 {{ frontendVersion }} / 后端 {{ backendVersion }}</span>
         </div>
       </section>
 
@@ -165,7 +166,7 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
@@ -178,6 +179,16 @@ const userStore = useUserStore()
 const formRef = ref(null)
 const loading = ref(false)
 const showPassword = ref(false)
+const frontendVersion = __APP_VERSION__
+const backendVersion = ref('')
+
+const displayVersion = computed(() => {
+  return backendVersion.value || frontendVersion
+})
+
+const versionMismatch = computed(() => {
+  return backendVersion.value && backendVersion.value !== frontendVersion
+})
 
 const form = reactive({
   username: '',
@@ -187,6 +198,22 @@ const form = reactive({
 const rules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
+}
+
+onMounted(() => {
+  loadVersion()
+})
+
+async function loadVersion() {
+  try {
+    const res = await axios.get('/api/v1/meta/version')
+    const version = res?.data?.data?.version
+    if (typeof version === 'string' && version.trim()) {
+      backendVersion.value = version.trim()
+    }
+  } catch (err) {
+    console.warn('Failed to load backend version', err)
+  }
 }
 
 async function handleLogin() {
@@ -495,6 +522,12 @@ async function handleLogin() {
   color: var(--text-secondary);
   font-size: var(--text-xs);
   font-weight: 600;
+}
+
+.pill-warning {
+  background: rgba(255, 160, 0, 0.12);
+  border-color: rgba(255, 160, 0, 0.22);
+  color: #9a5a00;
 }
 
 .login-card {

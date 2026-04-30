@@ -1,6 +1,8 @@
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import os from 'os'
+import fs from 'fs'
+import path from 'path'
 
 function getLocalIp() {
   const interfaces = os.networkInterfaces()
@@ -14,8 +16,24 @@ function getLocalIp() {
   return '127.0.0.1'
 }
 
+function resolveAppVersion(env) {
+  const explicitVersion = (env.VITE_APP_VERSION || process.env.VITE_APP_VERSION || '').trim()
+  if (explicitVersion) {
+    return explicitVersion
+  }
+
+  const versionPath = path.resolve(process.cwd(), '../VERSION')
+  try {
+    const fileVersion = fs.readFileSync(versionPath, 'utf8').trim()
+    return fileVersion || 'dev'
+  } catch {
+    return 'dev'
+  }
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  const appVersion = resolveAppVersion(env)
 
   // 对外访问地址可自动探测，但本地开发代理默认回环到本机后端
   const publicHost = env.VITE_SERVER_IP || getLocalIp()
@@ -32,6 +50,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [vue()],
+    define: {
+      __APP_VERSION__: JSON.stringify(appVersion)
+    },
     server: {
       port: parseInt(frontendPort),
       host: '0.0.0.0',

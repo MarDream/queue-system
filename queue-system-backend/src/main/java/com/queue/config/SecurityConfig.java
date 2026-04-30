@@ -41,6 +41,7 @@ public class SecurityConfig {
                 // Public endpoints - allow all
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 .requestMatchers("/api/v1/health").permitAll()
+                .requestMatchers("/api/v1/meta/version").permitAll()
                 .requestMatchers("/api/v1/business-types/**").permitAll()
                 // Regions: GET is public (for kiosk/display), write requires auth
                 .requestMatchers(HttpMethod.GET, "/api/v1/regions", "/api/v1/regions/**").permitAll()

@@ -1,3 +1,5 @@
+ARG APP_VERSION=dev
+
 # ---- Stage 1: Build ----
 FROM maven:3.9-eclipse-temurin-21 AS builder
 WORKDIR /build
@@ -11,13 +13,15 @@ RUN mvn clean package -DskipTests -B
 # ---- Stage 2: Runtime ----
 FROM eclipse-temurin:21-jre-alpine
 LABEL maintainer="queue-system"
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
 
 WORKDIR /app
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 RUN mkdir -p /app/config
 
-COPY --from=builder /build/target/queue-system-backend-1.0.1.jar app.jar
+COPY --from=builder /build/target/*.jar app.jar
 RUN chown -R appuser:appgroup /app
 
 USER appuser

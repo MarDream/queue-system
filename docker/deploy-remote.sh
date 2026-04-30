@@ -16,7 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.standalone.yml"
 ENV_FILE="$SCRIPT_DIR/.env"
-FRONTEND_IMAGE="queue-frontend-dist:latest"
+VERSION_FILE="$REPO_ROOT/VERSION"
 
 compose_cmd() {
   if docker compose version >/dev/null 2>&1; then
@@ -43,8 +43,22 @@ set -a
 . "$ENV_FILE"
 set +a
 
+if [ ! -f "$VERSION_FILE" ]; then
+  echo "ERROR: Version file not found: $VERSION_FILE"
+  exit 1
+fi
+
+APP_VERSION="$(tr -d '\r\n' < "$VERSION_FILE")"
+if [ -z "$APP_VERSION" ]; then
+  echo "ERROR: Version file is empty: $VERSION_FILE"
+  exit 1
+fi
+
+export APP_VERSION
+FRONTEND_IMAGE="queue-frontend-dist:$APP_VERSION"
+
 deploy_backend() {
-  echo "[backend] Rebuilding and restarting backend container..."
+  echo "[backend] Rebuilding and restarting backend container (version: $APP_VERSION)..."
   compose_cmd -f "$COMPOSE_FILE" up -d --build backend
 }
 
@@ -69,8 +83,8 @@ deploy_frontend() {
   rm -rf "$staging_dir"
   mkdir -p "$staging_dir"
 
-  echo "[frontend] Building dist image..."
-  docker build -f "$SCRIPT_DIR/frontend/Dockerfile" -t "$FRONTEND_IMAGE" "$REPO_ROOT/queue-system-frontend"
+  echo "[frontend] Building dist image (version: $APP_VERSION)..."
+  docker build --build-arg APP_VERSION="$APP_VERSION" -f "$SCRIPT_DIR/frontend/Dockerfile" -t "$FRONTEND_IMAGE" "$REPO_ROOT/queue-system-frontend"
 
   echo "[frontend] Exporting dist to staging directory..."
   docker run --rm -v "$staging_dir:/output" "$FRONTEND_IMAGE" >/dev/null
@@ -101,6 +115,7 @@ esac
 
 echo ""
 echo "Deployment finished."
+echo "  Version       : $APP_VERSION"
 echo "  Mode          : $MODE"
 echo "  Backend port  : ${BACKEND_PORT:-8080}"
 if [ "$MODE" != "backend" ]; then

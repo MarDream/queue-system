@@ -6,7 +6,8 @@
 
 1. 服务器上保留这份源码仓库
 2. 第一次把 `docker/.env` 配好
-3. 以后每次更新只执行：
+3. 版本号统一维护在仓库根目录 `VERSION`
+4. 以后每次更新只执行：
 
 ```bash
 git pull
@@ -132,6 +133,17 @@ NGINX_CONTAINER_NAME=你的nginx容器名
 ```
 
 这样 `./deploy-remote.sh` 在发布前端后会顺手 reload Nginx。
+
+## 版本号约定
+
+当前部署链路以仓库根目录 `VERSION` 作为唯一版本源：
+
+- 后端镜像 tag 使用 `queue-backend:<VERSION>`
+- 前端构建镜像 tag 使用 `queue-frontend-dist:<VERSION>`
+- 后端运行时通过 `APP_VERSION` 暴露版本接口
+- 登录页优先展示后端返回的版本号
+
+以后发版时，只需要修改一次 `VERSION` 文件，再执行部署脚本即可。
 
 ## 日常发布
 
