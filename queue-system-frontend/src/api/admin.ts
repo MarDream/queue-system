@@ -2,6 +2,27 @@ import axios from 'axios'
 import request from './index'
 import type { BusinessType, Counter, CounterDTO, Region, SysMenu, SysButton, SysRole } from '../types'
 
+function buildAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem('token')
+  if (!token) return {}
+  const trimmed = token.trim()
+  if (!trimmed || trimmed === 'undefined' || trimmed === 'null') {
+    return {}
+  }
+  return { Authorization: `Bearer ${trimmed}` }
+}
+
+function triggerBlobDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 // 业务类型 API
 export const businessTypeApi = {
   list: (params?: { regionId?: number }) =>
@@ -37,6 +58,24 @@ export const counterApi = {
   delete: (id: number) =>
     request.delete<void>(`/admin/counters/${id}`),
 
+  downloadImportTemplate: async () => {
+    const resp = await axios.get('/api/v1/admin/counters/import-template', {
+      responseType: 'blob',
+      headers: buildAuthHeaders()
+    })
+    triggerBlobDownload(resp.data, 'counter_import_template.xlsx')
+  },
+
+  importExcel: async (file: File): Promise<{ importedCount: number }> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return request.post('/admin/counters/import', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+  },
+
   getStats: (id: number) =>
     request.get(`/admin/counters/${id}/stats`)
 }
@@ -57,6 +96,24 @@ export const regionApi = {
 
   delete: (id: number) =>
     request.delete<void>(`/regions/${id}`),
+
+  downloadImportTemplate: async () => {
+    const resp = await axios.get('/api/v1/regions/import-template', {
+      responseType: 'blob',
+      headers: buildAuthHeaders()
+    })
+    triggerBlobDownload(resp.data, 'region_import_template.xlsx')
+  },
+
+  importExcel: async (file: File): Promise<{ importedCount: number }> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return request.post('/regions/import', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+  },
 
   batchSort: (updates: Array<{ id: number; sortOrder: number }>) =>
     request.post<void>('/regions/batch-sort', updates)
@@ -177,27 +234,12 @@ export const aiQueryApi = {
     request.delete<any, any>(`/admin/ai/sessions/${sessionId}`, { params: { workspace } }),
 
   exportXlsx: async (params: { sessionId: string; workspace?: string }) => {
-    const token = localStorage.getItem('token')
-    const headers: Record<string, string> = {}
-    if (token && token.trim() && token.trim() !== 'undefined' && token.trim() !== 'null') {
-      headers.Authorization = `Bearer ${token.trim()}`
-    }
-
     const resp = await axios.get('/api/v1/admin/ai/export', {
       params: { sessionId: params.sessionId, workspace: params.workspace || 'admin' },
       responseType: 'blob',
-      headers
+      headers: buildAuthHeaders()
     })
-
-    const blob = resp.data
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `ai_export_${Date.now()}.xlsx`
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
+    triggerBlobDownload(resp.data, `ai_export_${Date.now()}.xlsx`)
   }
 }
 

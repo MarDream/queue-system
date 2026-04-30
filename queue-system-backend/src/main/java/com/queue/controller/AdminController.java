@@ -6,6 +6,7 @@ import com.queue.common.Result;
 import com.queue.common.ResultCode;
 import com.queue.dto.AdminTicketVO;
 import com.queue.dto.BusinessTypeDetailVO;
+import com.queue.dto.CounterImportResult;
 import com.queue.dto.CounterRecentServiceRow;
 import com.queue.dto.CounterDTO;
 import com.queue.dto.CounterStatsVO;
@@ -34,20 +35,39 @@ import com.queue.service.RegionBusinessService;
 import com.queue.service.RegionService;
 import com.queue.service.TicketService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.springframework.http.MediaType;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/v1/admin")
 public class AdminController {
+    private static final String[] COUNTER_IMPORT_HEADERS = {"所属区域区划代码", "窗口编号", "窗口名称", "支持业务类型"};
 
     private final BusinessTypeService businessTypeService;
     private final RegionBusinessService regionBusinessService;
@@ -236,43 +256,7 @@ public class AdminController {
         SysUser currentUser = authContextService.requireCurrentUser(request);
         // 新增：校验用户是否有权在该区域创建
         authContextService.assertRegionAccess(currentUser, dto.getRegionId());
-        Counter counter = new Counter();
-        counter.setRegionId(dto.getRegionId());
-        counter.setNumber(dto.getNumber());
-        counter.setName(dto.getName());
-        counter.setStatus(CounterStatus.IDLE.getValue());
-        counter.setOperatorName(dto.getOperatorName());
-        counterMapper.insert(counter);
-
-        // Insert business type associations
-        if (dto.getBusinessTypeIds() != null) {
-            for (Long btId : dto.getBusinessTypeIds()) {
-                if (businessTypeMapper.selectById(btId) == null) {
-                    throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE);
-                }
-                CounterBusiness cb = new CounterBusiness();
-                cb.setCounterId(counter.getId());
-                cb.setBusinessTypeId(btId);
-                counterBusinessMapper.insert(cb);
-            }
-        }
-
-        // Insert operator associations
-        if (dto.getOperatorIds() != null) {
-            for (Long opUserId : dto.getOperatorIds()) {
-                SysUser user = sysUserMapper.selectById(opUserId);
-                if (user == null || !"WINDOW_OPERATOR".equals(user.getRole())) {
-                    throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE.getCode(), "无效的操作员: " + opUserId);
-                }
-                CounterOperator co = new CounterOperator();
-                co.setCounterId(counter.getId());
-                co.setUserId(opUserId);
-                counterOperatorMapper.insert(co);
-            }
-        }
-
-        dto.setId(counter.getId());
-        dto.setStatus(CounterStatus.IDLE.getValue());
+        createCounterInternal(dto);
         return Result.ok(dto);
     }
 
@@ -325,6 +309,122 @@ public class AdminController {
             }
         }
         return Result.ok();
+    }
+
+    @GetMapping("/counters/import-template")
+    public void downloadCounterImportTemplate(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        authContextService.requireCurrentUser(request);
+        byte[] content = generateCounterImportTemplate();
+        String filename = "counter_import_template.xlsx";
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setHeader("Content-Disposition", "attachment;filename=" + URLEncoder.encode(filename, StandardCharsets.UTF_8));
+        response.getOutputStream().write(content);
+    }
+
+    @PostMapping(value = "/counters/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Transactional(rollbackFor = Exception.class)
+    public Result<CounterImportResult> importCounters(@RequestPart("file") MultipartFile file,
+                                                      HttpServletRequest request) {
+        SysUser currentUser = authContextService.requireCurrentUser(request);
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(400, "请先选择要导入的 Excel 文件");
+        }
+
+        try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
+            Sheet templateSheet = workbook.getSheet("窗口导入模板");
+            if (templateSheet == null) {
+                templateSheet = workbook.getNumberOfSheets() > 0 ? workbook.getSheetAt(0) : null;
+            }
+            if (templateSheet == null) {
+                throw new BusinessException(400, "导入文件缺少数据工作表");
+            }
+
+            DataFormatter formatter = new DataFormatter();
+            validateCounterImportHeader(templateSheet.getRow(0), formatter);
+
+            List<BusinessType> businessTypes = businessTypeService.listAll();
+            Map<String, BusinessType> businessTypeByName = businessTypes.stream()
+                    .filter(bt -> bt.getName() != null && !bt.getName().isBlank())
+                    .collect(Collectors.toMap(BusinessType::getName, bt -> bt, (left, right) -> left, LinkedHashMap::new));
+
+            Set<String> batchRegionNumberKeys = new LinkedHashSet<>();
+            int importedCount = 0;
+
+            for (int rowIndex = 1; rowIndex <= templateSheet.getLastRowNum(); rowIndex++) {
+                Row row = templateSheet.getRow(rowIndex);
+                if (row == null || isCounterImportRowEmpty(row, formatter)) {
+                    continue;
+                }
+
+                int displayRowNum = rowIndex + 1;
+                String regionCode = formatter.formatCellValue(row.getCell(0)).trim();
+                String numberText = formatter.formatCellValue(row.getCell(1)).trim();
+                String counterName = formatter.formatCellValue(row.getCell(2)).trim();
+                String businessTypeNames = formatter.formatCellValue(row.getCell(3)).trim();
+
+                if (regionCode.isEmpty()) {
+                    throw new BusinessException(400, "第 " + displayRowNum + " 行缺少所属区域区划代码");
+                }
+                if (numberText.isEmpty()) {
+                    throw new BusinessException(400, "第 " + displayRowNum + " 行缺少窗口编号");
+                }
+                if (counterName.isEmpty()) {
+                    throw new BusinessException(400, "第 " + displayRowNum + " 行缺少窗口名称");
+                }
+                if (businessTypeNames.isEmpty()) {
+                    throw new BusinessException(400, "第 " + displayRowNum + " 行缺少支持业务类型");
+                }
+
+                Region region = regionService.getByCode(regionCode);
+                if (region == null) {
+                    throw new BusinessException(400, "第 " + displayRowNum + " 行所属区域区划代码不存在: " + regionCode);
+                }
+                authContextService.assertRegionAccess(currentUser, region.getId());
+
+                Integer counterNumber;
+                try {
+                    counterNumber = Integer.valueOf(numberText);
+                } catch (NumberFormatException e) {
+                    throw new BusinessException(400, "第 " + displayRowNum + " 行窗口编号必须为整数");
+                }
+                if (counterNumber <= 0) {
+                    throw new BusinessException(400, "第 " + displayRowNum + " 行窗口编号必须大于 0");
+                }
+
+                String batchKey = region.getId() + "#" + counterNumber;
+                if (!batchRegionNumberKeys.add(batchKey)) {
+                    throw new BusinessException(400, "第 " + displayRowNum + " 行窗口编号与同文件中的其他记录重复");
+                }
+
+                Counter existingCounter = counterMapper.selectOne(new QueryWrapper<Counter>()
+                        .eq("region_id", region.getId())
+                        .eq("number", counterNumber)
+                        .last("LIMIT 1"));
+                if (existingCounter != null) {
+                    throw new BusinessException(400, "第 " + displayRowNum + " 行窗口编号已存在于该区域: " + counterNumber);
+                }
+
+                List<Long> businessTypeIds = parseBusinessTypeIds(displayRowNum, businessTypeNames, businessTypeByName);
+                CounterDTO dto = new CounterDTO();
+                dto.setRegionId(region.getId());
+                dto.setNumber(counterNumber);
+                dto.setName(counterName);
+                dto.setBusinessTypeIds(businessTypeIds);
+                dto.setOperatorIds(List.of());
+                dto.setStatus(CounterStatus.IDLE.getValue());
+                createCounterInternal(dto);
+                importedCount++;
+            }
+
+            if (importedCount == 0) {
+                throw new BusinessException(400, "导入文件中没有可导入的数据");
+            }
+            return Result.ok(new CounterImportResult(importedCount));
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "读取 Excel 失败，请使用系统模板并上传 .xlsx 或 .xls 文件");
+        }
     }
 
     @DeleteMapping("/counters/{id}")
@@ -415,6 +515,153 @@ public class AdminController {
         SysUser currentUser = authContextService.requireCurrentUser(request);
         authContextService.assertRegionAccess(currentUser, regionId);
         return Result.ok(sysUserMapper.selectByRegionIdAndRole(regionId, "WINDOW_OPERATOR"));
+    }
+
+    private void createCounterInternal(CounterDTO dto) {
+        Counter counter = new Counter();
+        counter.setRegionId(dto.getRegionId());
+        counter.setNumber(dto.getNumber());
+        counter.setName(dto.getName());
+        counter.setStatus(CounterStatus.IDLE.getValue());
+        counter.setOperatorName(dto.getOperatorName());
+        counterMapper.insert(counter);
+
+        if (dto.getBusinessTypeIds() != null) {
+            for (Long btId : dto.getBusinessTypeIds()) {
+                if (businessTypeMapper.selectById(btId) == null) {
+                    throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE);
+                }
+                CounterBusiness cb = new CounterBusiness();
+                cb.setCounterId(counter.getId());
+                cb.setBusinessTypeId(btId);
+                counterBusinessMapper.insert(cb);
+            }
+        }
+
+        if (dto.getOperatorIds() != null) {
+            for (Long opUserId : dto.getOperatorIds()) {
+                SysUser user = sysUserMapper.selectById(opUserId);
+                if (user == null || !"WINDOW_OPERATOR".equals(user.getRole())) {
+                    throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE.getCode(), "无效的操作员: " + opUserId);
+                }
+                CounterOperator co = new CounterOperator();
+                co.setCounterId(counter.getId());
+                co.setUserId(opUserId);
+                counterOperatorMapper.insert(co);
+            }
+        }
+
+        dto.setId(counter.getId());
+        dto.setStatus(CounterStatus.IDLE.getValue());
+    }
+
+    private byte[] generateCounterImportTemplate() {
+        try (Workbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+            Sheet templateSheet = workbook.createSheet("窗口导入模板");
+            Row headerRow = templateSheet.createRow(0);
+            for (int i = 0; i < COUNTER_IMPORT_HEADERS.length; i++) {
+                headerRow.createCell(i).setCellValue(COUNTER_IMPORT_HEADERS[i]);
+                templateSheet.setColumnWidth(i, switch (i) {
+                    case 0 -> 20 * 256;
+                    case 1 -> 12 * 256;
+                    case 2 -> 18 * 256;
+                    default -> 42 * 256;
+                });
+            }
+
+            Sheet instructionSheet = workbook.createSheet("填写说明");
+            String[][] instructions = {
+                    {"字段", "说明"},
+                    {"所属区域区划代码", "必填，填写系统中已存在的区域区划代码。"},
+                    {"窗口编号", "必填，填写正整数，同一区域内不能重复。"},
+                    {"窗口名称", "必填，例如：1号窗口。"},
+                    {"支持业务类型", "必填，填写系统当前已存在的业务类型名称，多个业务用中文逗号、英文逗号、分号或顿号分隔。"},
+                    {"导入规则", "导入仅新增窗口，不会覆盖已有窗口；新增窗口默认状态为空闲。"},
+                    {"示例", "440300 | 1 | 1号窗口 | 开户, 取号咨询"},
+                    {"示例", "440305 | 2 | 南山综合窗口 | 社保办理，证明打印"}
+            };
+            for (int i = 0; i < instructions.length; i++) {
+                Row row = instructionSheet.createRow(i);
+                row.createCell(0).setCellValue(instructions[i][0]);
+                row.createCell(1).setCellValue(instructions[i][1]);
+            }
+            instructionSheet.setColumnWidth(0, 20 * 256);
+            instructionSheet.setColumnWidth(1, 88 * 256);
+
+            Sheet businessTypeSheet = workbook.createSheet("当前业务类型");
+            String[] businessHeaders = {"业务类型名称", "前缀", "状态", "描述"};
+            Row businessHeaderRow = businessTypeSheet.createRow(0);
+            for (int i = 0; i < businessHeaders.length; i++) {
+                businessHeaderRow.createCell(i).setCellValue(businessHeaders[i]);
+                businessTypeSheet.setColumnWidth(i, switch (i) {
+                    case 0 -> 24 * 256;
+                    case 1 -> 12 * 256;
+                    case 2 -> 12 * 256;
+                    default -> 42 * 256;
+                });
+            }
+            List<BusinessType> businessTypes = businessTypeService.listAll();
+            for (int i = 0; i < businessTypes.size(); i++) {
+                BusinessType businessType = businessTypes.get(i);
+                Row row = businessTypeSheet.createRow(i + 1);
+                row.createCell(0).setCellValue(Objects.toString(businessType.getName(), ""));
+                row.createCell(1).setCellValue(Objects.toString(businessType.getPrefix(), ""));
+                row.createCell(2).setCellValue(Boolean.TRUE.equals(businessType.getIsEnabled()) ? "启用" : "停用");
+                row.createCell(3).setCellValue(Objects.toString(businessType.getDescription(), ""));
+            }
+
+            workbook.write(outputStream);
+            return outputStream.toByteArray();
+        } catch (Exception e) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "生成导入模板失败");
+        }
+    }
+
+    private void validateCounterImportHeader(Row headerRow, DataFormatter formatter) {
+        if (headerRow == null) {
+            throw new BusinessException(400, "导入文件缺少表头，请先下载模板");
+        }
+        for (int i = 0; i < COUNTER_IMPORT_HEADERS.length; i++) {
+            String actual = formatter.formatCellValue(headerRow.getCell(i)).trim();
+            if (!COUNTER_IMPORT_HEADERS[i].equals(actual)) {
+                throw new BusinessException(400, "模板表头不正确，请先下载最新模板");
+            }
+        }
+    }
+
+    private boolean isCounterImportRowEmpty(Row row, DataFormatter formatter) {
+        for (int i = 0; i < COUNTER_IMPORT_HEADERS.length; i++) {
+            if (!formatter.formatCellValue(row.getCell(i)).trim().isEmpty()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private List<Long> parseBusinessTypeIds(int displayRowNum,
+                                            String businessTypeNames,
+                                            Map<String, BusinessType> businessTypeByName) {
+        List<Long> businessTypeIds = new ArrayList<>();
+        Set<Long> seenIds = new LinkedHashSet<>();
+        String[] tokens = businessTypeNames.split("[,，;；、\\n]+");
+        for (String token : tokens) {
+            String name = token.trim();
+            if (name.isEmpty()) {
+                continue;
+            }
+            BusinessType businessType = businessTypeByName.get(name);
+            if (businessType == null) {
+                throw new BusinessException(400, "第 " + displayRowNum + " 行存在无效业务类型: " + name);
+            }
+            if (seenIds.add(businessType.getId())) {
+                businessTypeIds.add(businessType.getId());
+            }
+        }
+        if (businessTypeIds.isEmpty()) {
+            throw new BusinessException(400, "第 " + displayRowNum + " 行缺少有效的支持业务类型");
+        }
+        return businessTypeIds;
     }
 
     // Ticket list for admin

@@ -15,8 +15,19 @@ public interface TicketMapper extends BaseMapper<Ticket> {
     @Select("SELECT * FROM ticket WHERE status = 'waiting' AND business_type_id = #{businessTypeId} ORDER BY created_at ASC LIMIT 1")
     Ticket selectWaitingByBusinessTypeId(@Param("businessTypeId") Long businessTypeId);
 
-    @Select("SELECT COALESCE(MAX(CAST(SUBSTRING(ticket_no, 7) AS UNSIGNED)), 0) FROM ticket WHERE region_id = #{regionId} AND business_type_id = #{businessTypeId} AND DATE(created_at) = CURDATE()")
-    Long selectMaxSequenceByRegionAndBusinessTypeId(@Param("regionId") Long regionId, @Param("businessTypeId") Long businessTypeId);
+    @Select("""
+            SELECT COALESCE(MAX(CAST(RIGHT(ticket_no, 3) AS UNSIGNED)), 0)
+            FROM ticket
+            WHERE deleted = 0
+              AND region_id = #{regionId}
+              AND business_type_id = #{businessTypeId}
+              AND created_at >= #{startOfDay}
+              AND created_at < #{endOfDay}
+            """)
+    Long selectMaxSequenceByRegionAndBusinessTypeId(@Param("regionId") Long regionId,
+                                                    @Param("businessTypeId") Long businessTypeId,
+                                                    @Param("startOfDay") LocalDateTime startOfDay,
+                                                    @Param("endOfDay") LocalDateTime endOfDay);
 
     @Select("SELECT id, region_id, business_type_id FROM ticket WHERE deleted = 0 AND status = 'waiting' AND created_at < #{cutoff}")
     List<Ticket> selectExpiredWaitingTickets(@Param("cutoff") LocalDateTime cutoff);

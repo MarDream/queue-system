@@ -7,6 +7,23 @@
       <el-button type="primary" @click="handleSearch">
         <el-icon class="btn-i"><Search /></el-icon> 搜索
       </el-button>
+      <el-button v-if="canManageRegions" :loading="downloadingTemplate" @click="downloadTemplate">
+        <el-icon class="btn-i"><Download /></el-icon> 批量导入模板
+      </el-button>
+      <el-upload
+        v-if="canManageRegions"
+        ref="importUploadRef"
+        class="inline-upload"
+        :auto-upload="false"
+        :show-file-list="false"
+        :disabled="importingRegions"
+        accept=".xlsx,.xls"
+        :on-change="handleImportFile"
+      >
+        <el-button type="success" :loading="importingRegions">
+          <el-icon class="btn-i"><Upload /></el-icon> 批量导入
+        </el-button>
+      </el-upload>
       <el-button v-if="canEditCity" type="primary" @click="openCreate('city')">
         <el-icon class="btn-i"><Plus /></el-icon> 新增
       </el-button>
@@ -249,9 +266,9 @@
 <script setup>
 import { ref, onMounted, nextTick, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { DCaret, InfoFilled, Plus, Edit, Delete, Search } from '@element-plus/icons-vue'
+import { DCaret, InfoFilled, Plus, Edit, Delete, Search, Download, Upload } from '@element-plus/icons-vue'
 import request from '../../api/index'
-import { regionBusinessApi } from '../../api/admin'
+import { regionApi, regionBusinessApi } from '../../api/admin'
 import Sortable from 'sortablejs'
 import { useUserStore } from '../../stores/user'
 
@@ -262,12 +279,16 @@ const treeData = ref([])
 const allFlatData = ref([]) // 全量扁平数据，用于搜索过滤
 const tableLoading = ref(false)
 const tableRef = ref(null)
+const importUploadRef = ref(null)
 
 // 搜索
 const filterKeyword = ref('')
+const downloadingTemplate = ref(false)
+const importingRegions = ref(false)
 
 // 权限
 const canEditCity = computed(() => userStore.isSuperAdmin)
+const canManageRegions = computed(() => userStore.isSuperAdmin || userStore.isRegionAdmin)
 
 // 级别标签
 function levelTagType(level) {
@@ -375,6 +396,51 @@ function isMatchOrAncestor(item, matchedIds, allData) {
 
 function handleSearch() {
   applyFilter()
+}
+
+async function downloadTemplate() {
+  downloadingTemplate.value = true
+  try {
+    await regionApi.downloadImportTemplate()
+    ElMessage.success('模板已开始下载')
+  } catch (e) {
+    ElMessage.error(e.message || '模板下载失败')
+  } finally {
+    downloadingTemplate.value = false
+  }
+}
+
+function clearImportFiles() {
+  importUploadRef.value?.clearFiles?.()
+}
+
+async function handleImportFile(file) {
+  const rawFile = file?.raw
+  if (!rawFile) {
+    clearImportFiles()
+    return
+  }
+
+  const filename = rawFile.name.toLowerCase()
+  if (!filename.endsWith('.xlsx') && !filename.endsWith('.xls')) {
+    ElMessage.warning('请上传 Excel 文件')
+    clearImportFiles()
+    return
+  }
+
+  importingRegions.value = true
+  try {
+    const result = await regionApi.importExcel(rawFile)
+    ElMessage.success(`成功导入 ${result?.importedCount ?? 0} 条区域`)
+    await fetchData()
+  } catch (e) {
+    await ElMessageBox.alert(e.message || '批量导入失败', '批量导入失败', {
+      type: 'error'
+    })
+  } finally {
+    importingRegions.value = false
+    clearImportFiles()
+  }
 }
 
 // 为表格行添加 class，标识 parentId 用于拖拽分组
@@ -748,6 +814,14 @@ onMounted(() => {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.inline-upload {
+  display: inline-flex;
+}
+
+:deep(.inline-upload .el-upload) {
+  display: inline-flex;
 }
 
 /* 表格 */

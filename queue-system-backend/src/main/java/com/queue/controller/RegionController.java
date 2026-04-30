@@ -3,6 +3,7 @@ package com.queue.controller;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.queue.common.Result;
 import com.queue.common.ResultCode;
+import com.queue.dto.RegionImportResult;
 import com.queue.dto.RegionPageRequest;
 import com.queue.dto.RegionSortRequest;
 import com.queue.entity.Region;
@@ -11,9 +12,15 @@ import com.queue.mapper.SysUserMapper;
 import com.queue.service.AuthContextService;
 import com.queue.service.RegionService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -129,6 +136,22 @@ public class RegionController {
     @GetMapping("/code/{code}/fullname")
     public Result<String> getFullRegionName(@PathVariable String code) {
         return Result.ok(regionService.getFullRegionName(code));
+    }
+
+    @GetMapping("/import-template")
+    public void downloadImportTemplate(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        authContextService.requireCurrentUser(request);
+        byte[] content = regionService.generateImportTemplate();
+        String filename = "region_import_template.xlsx";
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setHeader("Content-Disposition", "attachment;filename=" + URLEncoder.encode(filename, StandardCharsets.UTF_8));
+        response.getOutputStream().write(content);
+    }
+
+    @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Result<RegionImportResult> importRegions(@RequestPart("file") MultipartFile file, HttpServletRequest request) {
+        SysUser currentUser = authContextService.requireCurrentUser(request);
+        return Result.ok(regionService.importRegions(file, currentUser));
     }
 
     @PostMapping

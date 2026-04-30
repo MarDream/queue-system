@@ -40,6 +40,22 @@
           <el-icon><Refresh /></el-icon> 刷新
         </el-button>
         <div class="toolbar-actions">
+          <el-button :loading="downloadingTemplate" @click="showImportTemplateNotice">
+            <el-icon class="btn-i"><Download /></el-icon> 批量导入模板
+          </el-button>
+          <el-upload
+            ref="importUploadRef"
+            class="inline-upload"
+            :auto-upload="false"
+            :show-file-list="false"
+            :disabled="importingCounters"
+            accept=".xlsx,.xls"
+            :on-change="handleImportFile"
+          >
+            <el-button type="success" :loading="importingCounters">
+              <el-icon class="btn-i"><Upload /></el-icon> 批量导入
+            </el-button>
+          </el-upload>
           <el-button type="primary" @click="openCreate">
             <el-icon class="btn-i"><Plus /></el-icon> 新增窗口
           </el-button>
@@ -354,7 +370,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete, Search, RefreshRight, Refresh } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Search, RefreshRight, Refresh, Download, Upload } from '@element-plus/icons-vue'
 import { StatusBadge } from './index.js'
 import request from '../../api/index'
 import { counterApi } from '../../api/admin'
@@ -371,6 +387,9 @@ const tableContainerRef = ref(null)
 const tableHeight = ref(360)
 let tableResizeObserver = null
 const formRef = ref(null)
+const importUploadRef = ref(null)
+const downloadingTemplate = ref(false)
+const importingCounters = ref(false)
 
 const formRules = {
   regionId: [{ required: true, message: '请选择所属区域', trigger: 'change' }],
@@ -615,6 +634,69 @@ function resetFilters() {
 
 function refresh() {
   fetchList()
+}
+
+async function showImportTemplateNotice() {
+  try {
+    await ElMessageBox.confirm(
+      '1. 模板中的“支持业务类型”请填写系统当前已存在的业务类型名称。<br/>2. 多个业务类型可用中文逗号、英文逗号、分号或顿号分隔。<br/>3. 下载的模板会附带“当前业务类型”工作表，便于填写时核对。',
+      '批量导入说明',
+      {
+        confirmButtonText: '下载模板',
+        cancelButtonText: '取消',
+        type: 'info',
+        dangerouslyUseHTMLString: true
+      }
+    )
+    await downloadTemplate()
+  } catch (err) {
+    if (err !== 'cancel') ElMessage.error(err.message)
+  }
+}
+
+async function downloadTemplate() {
+  downloadingTemplate.value = true
+  try {
+    await counterApi.downloadImportTemplate()
+    ElMessage.success('模板已开始下载')
+  } catch (err) {
+    ElMessage.error(err.message || '模板下载失败')
+  } finally {
+    downloadingTemplate.value = false
+  }
+}
+
+function clearImportFiles() {
+  importUploadRef.value?.clearFiles?.()
+}
+
+async function handleImportFile(file) {
+  const rawFile = file?.raw
+  if (!rawFile) {
+    clearImportFiles()
+    return
+  }
+
+  const filename = rawFile.name.toLowerCase()
+  if (!filename.endsWith('.xlsx') && !filename.endsWith('.xls')) {
+    ElMessage.warning('请上传 Excel 文件')
+    clearImportFiles()
+    return
+  }
+
+  importingCounters.value = true
+  try {
+    const result = await counterApi.importExcel(rawFile)
+    ElMessage.success(`成功导入 ${result?.importedCount ?? 0} 个窗口`)
+    await fetchList()
+  } catch (err) {
+    await ElMessageBox.alert(err.message || '批量导入失败', '批量导入失败', {
+      type: 'error'
+    })
+  } finally {
+    importingCounters.value = false
+    clearImportFiles()
+  }
 }
 
 async function batchPause() {
@@ -976,6 +1058,17 @@ watch([currentPage, pageSize, filteredCounters], () => {
 
 .toolbar-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.inline-upload {
+  display: inline-flex;
+}
+
+:deep(.inline-upload .el-upload) {
+  display: inline-flex;
 }
 
 .status-tabs :deep(.el-radio-button__inner) {
@@ -1312,6 +1405,7 @@ watch([currentPage, pageSize, filteredCounters], () => {
     margin-left: 0;
     display: flex;
     justify-content: flex-end;
+    flex-wrap: wrap;
   }
 
   .kpi-card {

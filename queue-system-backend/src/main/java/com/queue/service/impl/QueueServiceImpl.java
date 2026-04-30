@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
@@ -60,13 +61,40 @@ public class QueueServiceImpl implements QueueService {
     public long generateSequence(Long regionId, Long businessTypeId) {
         String date = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
         String key = seqKey(regionId, businessTypeId, date);
+        LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
+        LocalDateTime endOfDay = startOfDay.plusDays(1);
 
-        Long seq = stringRedisTemplate.opsForValue().increment(key);
-        if (seq != null && seq == 1L) {
-            // 首次生成，设置过期时间
+        Long currentMax = ticketMapper.selectMaxSequenceByRegionAndBusinessTypeId(
+                regionId,
+                businessTypeId,
+                startOfDay,
+                endOfDay
+        );
+        long dbFloor = currentMax != null && currentMax > 0 ? currentMax : 0L;
+        long cachedFloor = 0L;
+        String cached = stringRedisTemplate.opsForValue().get(key);
+        if (cached != null) {
+            try {
+                cachedFloor = Long.parseLong(cached);
+            } catch (NumberFormatException ignored) {
+                cachedFloor = 0L;
+            }
+        }
+
+        long floor = Math.max(dbFloor, cachedFloor);
+        if (cached == null || cachedFloor < floor) {
+            stringRedisTemplate.opsForValue().set(key, String.valueOf(floor), Duration.ofHours(48));
+        } else {
             stringRedisTemplate.expire(key, Duration.ofHours(48));
         }
-        return seq != null ? seq : 1L;
+
+        Long seq = stringRedisTemplate.opsForValue().increment(key);
+        if (seq != null) {
+            stringRedisTemplate.expire(key, Duration.ofHours(48));
+            return seq;
+        }
+
+        return dbFloor + 1L;
     }
 
     @Override

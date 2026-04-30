@@ -1,8 +1,12 @@
 package com.queue.service;
 
+import com.queue.dto.RegionImportResult;
 import com.queue.dto.RegionPageRequest;
 import com.queue.dto.RegionSortRequest;
 import com.queue.entity.Region;
+import com.queue.entity.SysUser;
+import org.springframework.web.multipart.MultipartFile;
+
 import java.util.List;
 
 public interface RegionService {
@@ -23,4 +27,8 @@ public interface RegionService {
      * 获取指定区域及其所有子区域的ID列表（递归）
      */
     List<Long> getDescendantRegionIds(Long regionId);
+
+    byte[] generateImportTemplate();
+
+    RegionImportResult importRegions(MultipartFile file, SysUser currentUser);
 }

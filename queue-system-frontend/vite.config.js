@@ -17,16 +17,17 @@ function getLocalIp() {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
-  // 优先使用环境变量 VITE_SERVER_IP，未配置则自动获取
-  const serverIp = env.VITE_SERVER_IP || getLocalIp()
-  const backendPort = env.VITE_BACKEND_PORT || 8888
+  // 对外访问地址可自动探测，但本地开发代理默认回环到本机后端
+  const publicHost = env.VITE_SERVER_IP || getLocalIp()
+  const backendHost = env.VITE_BACKEND_HOST || '127.0.0.1'
+  const backendPort = env.VITE_BACKEND_PORT || 8080
   const frontendPort = env.VITE_FRONTEND_PORT || 5173
   const source = env.VITE_SERVER_IP ? 'configured' : 'auto-detect'
 
   console.log('========================================')
-  console.log(`  Server IP  : ${serverIp} (${source})`)
-  console.log(`  Frontend   : http://${serverIp}:${frontendPort}`)
-  console.log(`  API Proxy  : http://${serverIp}:${backendPort}`)
+  console.log(`  Server IP  : ${publicHost} (${source})`)
+  console.log(`  Frontend   : http://${publicHost}:${frontendPort}`)
+  console.log(`  API Proxy  : http://${backendHost}:${backendPort}`)
   console.log('========================================')
 
   return {
@@ -36,7 +37,7 @@ export default defineConfig(({ mode }) => {
       host: '0.0.0.0',
       proxy: {
         '/api': {
-          target: `http://${serverIp}:${backendPort}`,
+          target: `http://${backendHost}:${backendPort}`,
           changeOrigin: true
         }
       }

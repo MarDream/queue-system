@@ -7,6 +7,7 @@ import com.queue.entity.SysUser;
 import com.queue.mapper.SysUserMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
@@ -15,11 +16,15 @@ import java.util.List;
 import java.util.Set;
 
 @Service
-@RequiredArgsConstructor
 public class AuthContextService {
 
     private final SysUserMapper sysUserMapper;
     private final RegionService regionService;
+
+    public AuthContextService(SysUserMapper sysUserMapper, @Lazy RegionService regionService) {
+        this.sysUserMapper = sysUserMapper;
+        this.regionService = regionService;
+    }
 
     public Long getCurrentUserId(HttpServletRequest request) {
         if (request == null) {

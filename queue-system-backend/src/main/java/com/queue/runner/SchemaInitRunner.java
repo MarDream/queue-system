@@ -80,6 +80,9 @@ public class SchemaInitRunner implements CommandLineRunner {
             // 迁移：补齐手机号保护字段
             migrateProtectedPhoneColumns(conn);
 
+            // 迁移：补齐区域数据范围表
+            migrateUserRegionScopeTable(conn);
+
             // 迁移：补齐热路径查询索引
             migratePerformanceIndexes(conn);
 
@@ -239,6 +242,29 @@ public class SchemaInitRunner implements CommandLineRunner {
         }
     }
 
+    private void migrateUserRegionScopeTable(Connection conn) {
+        try {
+            if (tableExists(conn, "sys_user_region_scope")) {
+                return;
+            }
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("""
+                        CREATE TABLE sys_user_region_scope (
+                            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                            user_id BIGINT NOT NULL COMMENT '用户ID',
+                            region_id BIGINT NOT NULL COMMENT '区域ID',
+                            UNIQUE KEY uk_user_region (user_id, region_id),
+                            INDEX idx_user (user_id),
+                            INDEX idx_region (region_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户区域数据范围'
+                        """);
+                System.out.println("sys_user_region_scope 表添加成功");
+            }
+        } catch (Exception e) {
+            System.err.println("sys_user_region_scope 表迁移失败: " + e.getMessage());
+        }
+    }
+
     private void migratePerformanceIndexes(Connection conn) {
         try {
             ensureIndex(conn, "ticket", "idx_ticket_region_status_created",
@@ -281,6 +307,13 @@ public class SchemaInitRunner implements CommandLineRunner {
         DatabaseMetaData metaData = conn.getMetaData();
         try (ResultSet columns = metaData.getColumns(null, null, tableName, columnName)) {
             return columns.next();
+        }
+    }
+
+    private boolean tableExists(Connection conn, String tableName) throws SQLException {
+        DatabaseMetaData metaData = conn.getMetaData();
+        try (ResultSet tables = metaData.getTables(null, null, tableName, null)) {
+            return tables.next();
         }
     }
 
