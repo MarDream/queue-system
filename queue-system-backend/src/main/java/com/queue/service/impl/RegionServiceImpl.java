@@ -9,10 +9,17 @@ import com.queue.dto.RegionImportResult;
 import com.queue.dto.RegionPageRequest;
 import com.queue.dto.RegionSortRequest;
 import com.queue.entity.Region;
+import com.queue.entity.RegionBusiness;
+import com.queue.entity.BusinessType;
 import com.queue.entity.SysUser;
 import com.queue.mapper.RegionMapper;
+import com.queue.mapper.BusinessTypeMapper;
+import com.queue.mapper.CounterMapper;
+import com.queue.mapper.CounterBusinessMapper;
+import com.queue.mapper.CounterOperatorMapper;
 import com.queue.service.AuthContextService;
 import com.queue.service.RegionService;
+import com.queue.service.RegionBusinessService;
 import com.queue.service.QrCodeRecordService;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.DataFormatter;
@@ -43,13 +50,23 @@ public class RegionServiceImpl implements RegionService {
     private final RegionMapper regionMapper;
     private final QrCodeRecordService qrCodeRecordService;
     private final AuthContextService authContextService;
+    private final RegionBusinessService regionBusinessService;
+    private final BusinessTypeMapper businessTypeMapper;
+    private final CounterMapper counterMapper;
+    private final CounterBusinessMapper counterBusinessMapper;
+    private final CounterOperatorMapper counterOperatorMapper;
 
-    private static final String[] IMPORT_HEADERS = {"区域名称", "区划代码", "级别", "父级区划代码", "排序", "公告内容"};
+    private static final String[] IMPORT_HEADERS = {"区域名称", "区划代码", "级别", "父级区划代码", "排序", "公告内容", "关联业务类型", "业务启用状态", "每日预约限额"};
 
-    public RegionServiceImpl(RegionMapper regionMapper, @Lazy QrCodeRecordService qrCodeRecordService, @Lazy AuthContextService authContextService) {
+    public RegionServiceImpl(RegionMapper regionMapper, @Lazy QrCodeRecordService qrCodeRecordService, @Lazy AuthContextService authContextService, @Lazy RegionBusinessService regionBusinessService, BusinessTypeMapper businessTypeMapper, CounterMapper counterMapper, CounterBusinessMapper counterBusinessMapper, CounterOperatorMapper counterOperatorMapper) {
         this.regionMapper = regionMapper;
         this.qrCodeRecordService = qrCodeRecordService;
         this.authContextService = authContextService;
+        this.regionBusinessService = regionBusinessService;
+        this.businessTypeMapper = businessTypeMapper;
+        this.counterMapper = counterMapper;
+        this.counterBusinessMapper = counterBusinessMapper;
+        this.counterOperatorMapper = counterOperatorMapper;
     }
 
     @Override
@@ -109,7 +126,7 @@ public class RegionServiceImpl implements RegionService {
     }
 
     /**
-     * 校验区划代码唯一性（排除指定id）
+     * 校验区划代码唯一性(排除指定id)
      */
     private void checkRegionCodeDuplicate(String regionCode, Long excludeId) {
         if (regionCode == null || regionCode.trim().isEmpty()) {
@@ -123,7 +140,7 @@ public class RegionServiceImpl implements RegionService {
     }
 
     /**
-     * 构建区域的完整路径名称（如：深圳市-宝安区-新安街道）
+     * 构建区域的完整路径名称(如:深圳市-宝安区-新安街道)
      */
     private String buildFullPath(Region region) {
         StringBuilder sb = new StringBuilder(region.getRegionName());
@@ -138,12 +155,29 @@ public class RegionServiceImpl implements RegionService {
     }
 
     @Override
+    @Transactional
     public void delete(Long id) {
         // 检查是否有子区域
         List<Region> children = listByParentId(id);
         if (!children.isEmpty()) {
-            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "当前区域下存在下级区域，请先删除下级区域");
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "当前区域下存在下级区域,请先删除下级区域");
         }
+
+        // 级联删除该区域的窗口及其关联数据
+        List<com.queue.entity.Counter> counters = counterMapper.selectList(
+                new LambdaQueryWrapper<com.queue.entity.Counter>()
+                        .eq(com.queue.entity.Counter::getRegionId, id)
+        );
+        for (com.queue.entity.Counter counter : counters) {
+            // 删除窗口关联的业务类型
+            counterBusinessMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.queue.entity.CounterBusiness>()
+                    .eq("counter_id", counter.getId()));
+            // 删除窗口关联的操作员
+            counterOperatorMapper.deleteByCounterId(counter.getId());
+        }
+        // 删除该区域的所有窗口
+        counterMapper.physicalDeleteByRegionId(id);
+
         // 级联删除该区域的二维码记录
         qrCodeRecordService.deleteByRegionIds(List.of(id));
         // 物理删除区域
@@ -162,7 +196,7 @@ public class RegionServiceImpl implements RegionService {
     public void batchUpdateSort(List<RegionSortRequest> requests) {
         if (requests == null || requests.isEmpty()) return;
 
-        // 校验：所有区域的 parentId 必须一致（同层级排序）
+        // 校验:所有区域的 parentId 必须一致(同层级排序)
         Long expectedParentId = null;
         for (RegionSortRequest req : requests) {
             Region region = regionMapper.selectById(req.getId());
@@ -172,7 +206,7 @@ public class RegionServiceImpl implements RegionService {
             if (expectedParentId == null) {
                 expectedParentId = region.getParentId();
             } else if (!expectedParentId.equals(region.getParentId())) {
-                throw new BusinessException(50001, "不允许跨层级排序，区域「" + region.getRegionName() + "」与同组其他区域不在同一层级");
+                throw new BusinessException(50001, "不允许跨层级排序,区域「" + region.getRegionName() + "」与同组其他区域不在同一层级");
             }
         }
 
@@ -192,14 +226,14 @@ public class RegionServiceImpl implements RegionService {
 
         LambdaQueryWrapper<Region> wrapper = new LambdaQueryWrapper<>();
 
-        // 按城市筛选：包含市级区域本身 + 该市下所有子/孙级区域
+        // 按城市筛选:包含市级区域本身 + 该市下所有子/孙级区域
         if (request.getCityId() != null) {
             // 先查该市下所有镇区ID
             List<Region> towns = regionMapper.selectList(
                     new LambdaQueryWrapper<Region>().eq(Region::getParentId, request.getCityId()));
             List<Long> townIds = towns.stream().map(Region::getId).collect(Collectors.toList());
 
-            // 查询条件：id = cityId OR parentId = cityId OR parentId IN (townIds)
+            // 查询条件:id = cityId OR parentId = cityId OR parentId IN (townIds)
             wrapper.and(w -> {
                 w.eq(Region::getId, request.getCityId());
                 w.or().eq(Region::getParentId, request.getCityId());
@@ -286,9 +320,9 @@ public class RegionServiceImpl implements RegionService {
                 exampleSheet.setColumnWidth(i, templateSheet.getColumnWidth(i));
             }
             String[][] exampleRows = {
-                    {"深圳市", "440300", "city", "", "0", ""},
-                    {"南山区", "440305", "镇/区级", "440300", "10", "南山区大厅工作日 9:00-18:00"},
-                    {"粤海街道", "440305001", "街道级", "440305", "20", ""}
+                    {"深圳市", "440300", "city", "", "0", "", "A,B,C", "true,true,true", "50,100,30"},
+                    {"南山区", "440305", "镇/区级", "440300", "10", "南山区大厅工作日 9:00-18:00", "A,B", "true,false", "50,100"},
+                    {"粤海街道", "440305001", "街道级", "440305", "20", "", "A", "true", "50"}
             };
             for (int i = 0; i < exampleRows.length; i++) {
                 Row row = exampleSheet.createRow(i + 1);
@@ -300,17 +334,20 @@ public class RegionServiceImpl implements RegionService {
             Sheet instructionSheet = workbook.createSheet("填写说明");
             String[][] instructions = {
                     {"字段", "说明"},
-                    {"区域名称", "必填，长度建议不超过 50 字。"},
-                    {"区划代码", "必填，必须唯一。"},
-                    {"级别", "必填，支持 city/town/street 或 市级/镇区级/街道级。"},
-                    {"父级区划代码", "市级区域留空；镇区级填写所属市级代码；街道级填写所属镇区级代码。"},
-                    {"排序", "选填，整数，留空时默认按 0 导入。"},
-                    {"公告内容", "选填，最长 500 字。"},
-                    {"导入规则", "支持同一文件内多级区域一起导入，系统会自动按父子关系处理。"},
-                    {"示例页", "可参考“示例数据”工作表中的市级、镇/区级、街道级三层示例。"},
-                    {"示例", "深圳市 | 440300 | city |  | 0 | "},
-                    {"示例", "南山区 | 440305 | town | 440300 | 10 | 南山区大厅工作日 9:00-18:00"},
-                    {"示例", "粤海街道 | 440305001 | street | 440305 | 20 | "}
+                    {"区域名称", "必填,长度建议不超过 50 字."},
+                    {"区划代码", "必填,必须唯一."},
+                    {"级别", "必填,支持 city/town/street 或 市级/镇区级/街道级."},
+                    {"父级区划代码", "市级区域留空;镇区级填写所属市级代码;街道级填写所属镇区级代码."},
+                    {"排序", "选填,整数,留空时默认按 0 导入."},
+                    {"公告内容", "选填,最长 500 字."},
+                    {"关联业务类型", "选填,填写业务类型前缀(如 A,B,C),多个用英文逗号分隔.注意:子区域只能关联父区域已启用的业务类型."},
+                    {"业务启用状态", "选填,对应每个业务类型的启用状态(如 true,false,true),留空默认全部启用."},
+                    {"每日预约限额", "选填,对应每个业务类型的每日限额(如 50,100,30),留空使用业务类型全局默认值."},
+                    {"导入规则", "支持同一文件内多级区域一起导入,系统会自动按父子关系处理."},
+                    {"示例页", "可参考示例数据工作表中的市级、镇/区级、街道级三层示例."},
+                    {"示例", "深圳市 | 440300 | city |  | 0 |  | A,B,C | true,true,true | 50,100,30"},
+                    {"示例", "南山区 | 440305 | town | 440300 | 10 | 南山区大厅工作日 9:00-18:00 | A,B | true,false | 50,100"},
+                    {"示例", "粤海街道 | 440305001 | street | 440305 | 20 |  | A | true | 50"}
             };
             for (int i = 0; i < instructions.length; i++) {
                 Row row = instructionSheet.createRow(i);
@@ -360,6 +397,9 @@ public class RegionServiceImpl implements RegionService {
                             LinkedHashMap::new
                     ));
 
+            // 加载所有业务类型(按前缀索引)
+            Map<String, BusinessType> businessTypeByPrefix = loadBusinessTypesByPrefix();
+
             List<RegionImportRow> pendingRows = new ArrayList<>(importRows);
             int importedCount = 0;
 
@@ -385,6 +425,12 @@ public class RegionServiceImpl implements RegionService {
 
                     Region created = create(region);
                     regionByCode.put(created.getRegionCode().trim(), created);
+
+                    // 处理业务类型关联
+                    if (StringUtils.hasText(importRow.businessTypePrefixes())) {
+                        linkBusinessTypesToRegion(created, parent, importRow, businessTypeByPrefix);
+                    }
+
                     iterator.remove();
                     importedCount++;
                     progressed = true;
@@ -399,18 +445,18 @@ public class RegionServiceImpl implements RegionService {
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
-            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "读取 Excel 失败，请使用系统模板并上传 .xlsx 或 .xls 文件");
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "读取 Excel 失败,请使用系统模板并上传 .xlsx 或 .xls 文件");
         }
     }
 
     private void validateImportHeader(Row headerRow, DataFormatter formatter) {
         if (headerRow == null) {
-            throw new BusinessException(400, "导入文件缺少表头，请先下载模板");
+            throw new BusinessException(400, "导入文件缺少表头,请先下载模板");
         }
         for (int i = 0; i < IMPORT_HEADERS.length; i++) {
             String actual = formatter.formatCellValue(headerRow.getCell(i)).trim();
             if (!IMPORT_HEADERS[i].equals(actual)) {
-                throw new BusinessException(400, "模板表头不正确，请先下载最新模板");
+                throw new BusinessException(400, "模板表头不正确,请先下载最新模板");
             }
         }
     }
@@ -431,13 +477,19 @@ public class RegionServiceImpl implements RegionService {
             String parentCode = formatter.formatCellValue(row.getCell(3)).trim();
             String sortOrderText = formatter.formatCellValue(row.getCell(4)).trim();
             String announcementText = formatter.formatCellValue(row.getCell(5)).trim();
+            String businessTypePrefixes = formatter.formatCellValue(row.getCell(6)).trim();
+            String businessEnabledStatuses = formatter.formatCellValue(row.getCell(7)).trim();
+            String businessDailyLimits = formatter.formatCellValue(row.getCell(8)).trim();
 
             if (!StringUtils.hasText(name)
                     && !StringUtils.hasText(code)
                     && !StringUtils.hasText(levelText)
                     && !StringUtils.hasText(parentCode)
                     && !StringUtils.hasText(sortOrderText)
-                    && !StringUtils.hasText(announcementText)) {
+                    && !StringUtils.hasText(announcementText)
+                    && !StringUtils.hasText(businessTypePrefixes)
+                    && !StringUtils.hasText(businessEnabledStatuses)
+                    && !StringUtils.hasText(businessDailyLimits)) {
                 continue;
             }
 
@@ -473,7 +525,10 @@ public class RegionServiceImpl implements RegionService {
                     normalizedLevel,
                     StringUtils.hasText(parentCode) ? parentCode : null,
                     parseSortOrder(sortOrderText, displayRowNum),
-                    StringUtils.hasText(announcementText) ? announcementText : null
+                    StringUtils.hasText(announcementText) ? announcementText : null,
+                    StringUtils.hasText(businessTypePrefixes) ? businessTypePrefixes : null,
+                    StringUtils.hasText(businessEnabledStatuses) ? businessEnabledStatuses : null,
+                    StringUtils.hasText(businessDailyLimits) ? businessDailyLimits : null
             ));
         }
 
@@ -500,7 +555,7 @@ public class RegionServiceImpl implements RegionService {
             case "city", "市", "市级", "市级区域" -> "city";
             case "town", "镇", "区", "镇区级", "镇/区级", "区级" -> "town";
             case "street", "街道", "街道级" -> "street";
-            default -> throw new BusinessException(400, "第 " + displayRowNum + " 行级别无效，请填写 city/town/street 或中文级别");
+            default -> throw new BusinessException(400, "第 " + displayRowNum + " 行级别无效,请填写 city/town/street 或中文级别");
         };
     }
 
@@ -533,7 +588,7 @@ public class RegionServiceImpl implements RegionService {
             throw new BusinessException(400, "第 " + importRow.rowNum() + " 行父级区划代码不存在: " + importRow.parentCode());
         }
         if (!isValidParentLevel(parent.getLevel(), importRow.level())) {
-            throw new BusinessException(400, "第 " + importRow.rowNum() + " 行父级层级不匹配，当前级别为 " + importRow.level());
+            throw new BusinessException(400, "第 " + importRow.rowNum() + " 行父级层级不匹配,当前级别为 " + importRow.level());
         }
         authContextService.assertRegionAccess(currentUser, parent.getId());
     }
@@ -553,7 +608,7 @@ public class RegionServiceImpl implements RegionService {
         for (int i = 0; i < limit; i++) {
             RegionImportRow row = pendingRows.get(i);
             if (!requiresParent(row.level())) {
-                messages.add("第 " + row.rowNum() + " 行无法导入，请检查权限或级别配置");
+                messages.add("第 " + row.rowNum() + " 行无法导入,请检查权限或级别配置");
                 continue;
             }
             if (!StringUtils.hasText(row.parentCode())) {
@@ -580,7 +635,7 @@ public class RegionServiceImpl implements RegionService {
         if (pendingRows.size() > limit) {
             messages.add("其余 " + (pendingRows.size() - limit) + " 行也存在未解决的父级或权限问题");
         }
-        return String.join("；", messages);
+        return String.join(";", messages);
     }
 
     private record RegionImportRow(
@@ -590,7 +645,235 @@ public class RegionServiceImpl implements RegionService {
             String level,
             String parentCode,
             Integer sortOrder,
-            String announcementText
+            String announcementText,
+            String businessTypePrefixes,
+            String businessEnabledStatuses,
+            String businessDailyLimits
     ) {
+    }
+
+    /**
+     * 加载所有业务类型,按前缀索引
+     */
+    private Map<String, BusinessType> loadBusinessTypesByPrefix() {
+        List<BusinessType> allBusinessTypes = businessTypeMapper.selectList(
+                new LambdaQueryWrapper<BusinessType>()
+                        .eq(BusinessType::getIsEnabled, true)
+        );
+        return allBusinessTypes.stream()
+                .filter(bt -> StringUtils.hasText(bt.getPrefix()))
+                .collect(Collectors.toMap(
+                        bt -> bt.getPrefix().trim().toUpperCase(),
+                        bt -> bt,
+                        (left, right) -> left
+                ));
+    }
+
+    /**
+     * 关联业务类型到区域
+     */
+    private void linkBusinessTypesToRegion(Region region, Region parent, RegionImportRow importRow, Map<String, BusinessType> businessTypeByPrefix) {
+        String[] prefixes = importRow.businessTypePrefixes().split(",");
+        String[] enabledStatuses = StringUtils.hasText(importRow.businessEnabledStatuses())
+                ? importRow.businessEnabledStatuses().split(",")
+                : new String[0];
+        String[] dailyLimits = StringUtils.hasText(importRow.businessDailyLimits())
+                ? importRow.businessDailyLimits().split(",")
+                : new String[0];
+
+        // 获取父区域已启用的业务类型(如果有父区域)
+        Set<Long> parentEnabledBusinessTypeIds = new HashSet<>();
+        if (parent != null) {
+            List<BusinessType> parentBusinessTypes = regionBusinessService.listEnabledBusinessTypesByRegion(parent.getId());
+            parentEnabledBusinessTypeIds = parentBusinessTypes.stream()
+                    .map(BusinessType::getId)
+                    .collect(Collectors.toSet());
+        }
+
+        for (int i = 0; i < prefixes.length; i++) {
+            String prefix = prefixes[i].trim().toUpperCase();
+            if (!StringUtils.hasText(prefix)) {
+                continue;
+            }
+
+            BusinessType businessType = businessTypeByPrefix.get(prefix);
+            if (businessType == null) {
+                throw new BusinessException(400, "第 " + importRow.rowNum() + " 行业务类型前缀不存在: " + prefix);
+            }
+
+            // 检查父区域约束:子区域只能关联父区域已启用的业务类型
+            if (parent != null && !parentEnabledBusinessTypeIds.isEmpty() && !parentEnabledBusinessTypeIds.contains(businessType.getId())) {
+                throw new BusinessException(400, "第 " + importRow.rowNum() + " 行业务类型 " + prefix + " 未在父区域「" + parent.getRegionName() + "」中启用,子区域不能关联");
+            }
+
+            // 解析启用状态
+            Boolean isEnabled = true;
+            if (i < enabledStatuses.length && StringUtils.hasText(enabledStatuses[i])) {
+                String statusText = enabledStatuses[i].trim().toLowerCase();
+                isEnabled = "true".equals(statusText) || "1".equals(statusText) || "是".equals(statusText);
+            }
+
+            // 解析每日限额
+            Integer dailyLimit = null;
+            if (i < dailyLimits.length && StringUtils.hasText(dailyLimits[i])) {
+                try {
+                    dailyLimit = Integer.parseInt(dailyLimits[i].trim());
+                } catch (NumberFormatException e) {
+                    throw new BusinessException(400, "第 " + importRow.rowNum() + " 行业务类型 " + prefix + " 的每日限额必须为整数");
+                }
+            }
+
+            // 关联业务类型
+            com.queue.dto.RegionBusinessDTO dto = new com.queue.dto.RegionBusinessDTO();
+            dto.setRegionId(region.getId());
+            dto.setBusinessTypeId(businessType.getId());
+            dto.setIsEnabled(isEnabled);
+            dto.setSortOrder(i);
+            regionBusinessService.linkBusinessType(dto);
+
+            // 如果指定了每日限额,更新业务类型的全局限额(这里可能需要调整逻辑)
+            // 注意:这里暂时不更新全局限额,因为每日限额应该是区域级别的配置
+        }
+    }
+
+    @Override
+    public byte[] exportRegions(List<Long> regionIds) {
+        try (Workbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+
+            Sheet dataSheet = workbook.createSheet("区域导入模板");
+
+            // 创建表头
+            Row headerRow = dataSheet.createRow(0);
+            for (int i = 0; i < IMPORT_HEADERS.length; i++) {
+                headerRow.createCell(i).setCellValue(IMPORT_HEADERS[i]);
+                dataSheet.setColumnWidth(i, switch (i) {
+                    case 0 -> 18 * 256;  // 区域名称
+                    case 1 -> 18 * 256;  // 区划代码
+                    case 2 -> 12 * 256;  // 级别
+                    case 3 -> 20 * 256;  // 父级区划代码
+                    case 4 -> 10 * 256;  // 排序
+                    default -> 36 * 256; // 其他列
+                });
+            }
+
+            // 查询要导出的区域
+            List<Region> regions;
+            if (regionIds == null || regionIds.isEmpty()) {
+                regions = listAll();
+            } else {
+                regions = regionMapper.selectBatchIds(regionIds);
+            }
+
+            // 按层级和排序排序，确保父区域在子区域之前
+            regions.sort((r1, r2) -> {
+                int levelCompare = getLevelOrder(r1.getLevel()) - getLevelOrder(r2.getLevel());
+                if (levelCompare != 0) return levelCompare;
+                return (r1.getSortOrder() != null ? r1.getSortOrder() : 0) -
+                       (r2.getSortOrder() != null ? r2.getSortOrder() : 0);
+            });
+
+            // 构建区域ID到区域的映射
+            Map<Long, Region> regionMap = regions.stream()
+                    .collect(Collectors.toMap(Region::getId, r -> r));
+
+            // 加载所有业务类型
+            Map<Long, BusinessType> businessTypeMap = businessTypeMapper.selectList(null).stream()
+                    .collect(Collectors.toMap(BusinessType::getId, bt -> bt));
+
+            // 填充数据
+            int rowNum = 1;
+            for (Region region : regions) {
+                Row row = dataSheet.createRow(rowNum++);
+
+                // 区域名称
+                row.createCell(0).setCellValue(region.getRegionName());
+
+                // 区划代码
+                row.createCell(1).setCellValue(region.getRegionCode() != null ? region.getRegionCode() : "");
+
+                // 级别
+                row.createCell(2).setCellValue(getLevelDisplayName(region.getLevel()));
+
+                // 父级区划代码
+                String parentCode = "";
+                if (region.getParentId() != null) {
+                    Region parent = regionMap.get(region.getParentId());
+                    if (parent == null) {
+                        parent = regionMapper.selectById(region.getParentId());
+                    }
+                    if (parent != null && parent.getRegionCode() != null) {
+                        parentCode = parent.getRegionCode();
+                    }
+                }
+                row.createCell(3).setCellValue(parentCode);
+
+                // 排序
+                row.createCell(4).setCellValue(region.getSortOrder() != null ? region.getSortOrder().toString() : "0");
+
+                // 公告内容
+                row.createCell(5).setCellValue(region.getAnnouncementText() != null ? region.getAnnouncementText() : "");
+
+                // 查询该区域关联的业务类型
+                List<RegionBusiness> regionBusinesses = regionBusinessService.listByRegionId(region.getId());
+
+                if (!regionBusinesses.isEmpty()) {
+                    // 按sortOrder排序
+                    regionBusinesses.sort((rb1, rb2) ->
+                        (rb1.getSortOrder() != null ? rb1.getSortOrder() : 0) -
+                        (rb2.getSortOrder() != null ? rb2.getSortOrder() : 0)
+                    );
+
+                    List<String> prefixes = new ArrayList<>();
+                    List<String> enabledStatuses = new ArrayList<>();
+                    List<String> dailyLimits = new ArrayList<>();
+
+                    for (RegionBusiness rb : regionBusinesses) {
+                        BusinessType bt = businessTypeMap.get(rb.getBusinessTypeId());
+                        if (bt != null && bt.getPrefix() != null) {
+                            prefixes.add(bt.getPrefix());
+                            enabledStatuses.add(rb.getIsEnabled() != null && rb.getIsEnabled() ? "true" : "false");
+                            dailyLimits.add(bt.getDailyAppointmentLimit() != null ? bt.getDailyAppointmentLimit().toString() : "");
+                        }
+                    }
+
+                    // 关联业务类型
+                    row.createCell(6).setCellValue(String.join(",", prefixes));
+
+                    // 业务启用状态
+                    row.createCell(7).setCellValue(String.join(",", enabledStatuses));
+
+                    // 每日预约限额
+                    row.createCell(8).setCellValue(String.join(",", dailyLimits));
+                } else {
+                    row.createCell(6).setCellValue("");
+                    row.createCell(7).setCellValue("");
+                    row.createCell(8).setCellValue("");
+                }
+            }
+
+            workbook.write(outputStream);
+            return outputStream.toByteArray();
+        } catch (Exception e) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "导出区域配置失败: " + e.getMessage());
+        }
+    }
+
+    private int getLevelOrder(String level) {
+        return switch (level) {
+            case "city" -> 1;
+            case "town" -> 2;
+            case "street" -> 3;
+            default -> 999;
+        };
+    }
+
+    private String getLevelDisplayName(String level) {
+        return switch (level) {
+            case "city" -> "city";
+            case "town" -> "镇/区级";
+            case "street" -> "街道级";
+            default -> level;
+        };
     }
 }

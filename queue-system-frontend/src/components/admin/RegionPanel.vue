@@ -10,6 +10,9 @@
       <el-button v-if="canManageRegions" :loading="downloadingTemplate" @click="downloadTemplate">
         <el-icon class="btn-i"><Download /></el-icon> 批量导入模板
       </el-button>
+      <el-button v-if="canManageRegions" :loading="exportingRegions" @click="handleExport">
+        <el-icon class="btn-i"><Download /></el-icon> 批量导出
+      </el-button>
       <el-upload
         v-if="canManageRegions"
         ref="importUploadRef"
@@ -285,6 +288,7 @@ const importUploadRef = ref(null)
 const filterKeyword = ref('')
 const downloadingTemplate = ref(false)
 const importingRegions = ref(false)
+const exportingRegions = ref(false)
 
 // 权限
 const canEditCity = computed(() => userStore.isSuperAdmin)
@@ -440,6 +444,29 @@ async function handleImportFile(file) {
   } finally {
     importingRegions.value = false
     clearImportFiles()
+  }
+}
+
+async function handleExport() {
+  exportingRegions.value = true
+  try {
+    const response = await request.get('/regions/export', {
+      responseType: 'blob'
+    })
+    const blob = new Blob([response], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `regions_export_${Date.now()}.xlsx`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+    ElMessage.success('区域配置导出成功')
+  } catch (e) {
+    ElMessage.error(e.message || '导出失败')
+  } finally {
+    exportingRegions.value = false
   }
 }
 

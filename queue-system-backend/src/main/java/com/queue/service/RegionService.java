@@ -31,4 +31,9 @@ public interface RegionService {
     byte[] generateImportTemplate();
 
     RegionImportResult importRegions(MultipartFile file, SysUser currentUser);
+
+    /**
+     * 批量导出区域配置（包含关联的业务类型）
+     */
+    byte[] exportRegions(List<Long> regionIds);
 }

@@ -222,7 +222,7 @@ public class AdminController {
         return Result.ok(dtos);
     }
 
-    @GetMapping("/counters/{id}")
+    @GetMapping("/counters/{id:[0-9]+}")
     public Result<CounterDTO> getCounter(@PathVariable Long id, HttpServletRequest request) {
         SysUser currentUser = authContextService.requireCurrentUser(request);
         Counter c = counterMapper.selectById(id);
@@ -427,7 +427,19 @@ public class AdminController {
         }
     }
 
-    @DeleteMapping("/counters/{id}")
+    @GetMapping("/counters/export")
+    public void exportCounters(@RequestParam(required = false) List<Long> counterIds,
+                               HttpServletRequest request,
+                               HttpServletResponse response) throws IOException {
+        SysUser currentUser = authContextService.requireCurrentUser(request);
+        byte[] content = generateCounterExport(counterIds, currentUser);
+        String filename = "counters_export_" + System.currentTimeMillis() + ".xlsx";
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setHeader("Content-Disposition", "attachment;filename=" + URLEncoder.encode(filename, StandardCharsets.UTF_8));
+        response.getOutputStream().write(content);
+    }
+
+    @DeleteMapping("/counters/{id:[0-9]+}")
     public Result<Void> deleteCounter(@PathVariable Long id,
                                       HttpServletRequest request) {
         SysUser currentUser = authContextService.requireCurrentUser(request);
@@ -443,6 +455,68 @@ public class AdminController {
         counterBusinessMapper.delete(new QueryWrapper<CounterBusiness>().eq("counter_id", id));
         counterOperatorMapper.deleteByCounterId(id);
         return Result.ok();
+    }
+
+    @DeleteMapping("/counters/batch")
+    @Transactional
+    public Result<Map<String, Object>> batchDeleteCounters(@RequestBody List<Long> counterIds,
+                                                            HttpServletRequest request) {
+        SysUser currentUser = authContextService.requireCurrentUser(request);
+
+        if (counterIds == null || counterIds.isEmpty()) {
+            return Result.error(400, "请选择要删除的窗口");
+        }
+
+        int successCount = 0;
+        int failCount = 0;
+        List<String> errors = new ArrayList<>();
+
+        for (Long id : counterIds) {
+            try {
+                Counter counter = counterMapper.selectById(id);
+                if (counter == null) {
+                    errors.add("窗口ID " + id + " 不存在");
+                    failCount++;
+                    continue;
+                }
+
+                // 检查区域权限
+                try {
+                    authContextService.assertRegionAccess(currentUser, counter.getRegionId());
+                } catch (BusinessException e) {
+                    errors.add("窗口 " + counter.getName() + " 无权限删除");
+                    failCount++;
+                    continue;
+                }
+
+                // 检查窗口状态
+                if (!CounterStatus.IDLE.getValue().equals(counter.getStatus())) {
+                    errors.add("窗口 " + counter.getName() + " 状态不是空闲，无法删除");
+                    failCount++;
+                    continue;
+                }
+
+                // 物理删除
+                counterMapper.physicalDeleteById(id);
+                counterBusinessMapper.delete(new QueryWrapper<CounterBusiness>().eq("counter_id", id));
+                counterOperatorMapper.deleteByCounterId(id);
+                successCount++;
+            } catch (Exception e) {
+                errors.add("删除窗口ID " + id + " 失败: " + e.getMessage());
+                failCount++;
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("successCount", successCount);
+        result.put("failCount", failCount);
+        result.put("errors", errors);
+
+        if (failCount > 0 && successCount == 0) {
+            return Result.error(400, "批量删除失败");
+        }
+
+        return Result.ok(result);
     }
 
     // Window stats detail API
@@ -662,6 +736,106 @@ public class AdminController {
             throw new BusinessException(400, "第 " + displayRowNum + " 行缺少有效的支持业务类型");
         }
         return businessTypeIds;
+    }
+
+    private byte[] generateCounterExport(List<Long> counterIds, SysUser currentUser) {
+        try (Workbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+
+            Sheet dataSheet = workbook.createSheet("窗口导入模板");
+
+            // 创建表头
+            Row headerRow = dataSheet.createRow(0);
+            for (int i = 0; i < COUNTER_IMPORT_HEADERS.length; i++) {
+                headerRow.createCell(i).setCellValue(COUNTER_IMPORT_HEADERS[i]);
+                dataSheet.setColumnWidth(i, switch (i) {
+                    case 0 -> 20 * 256;  // 所属区域区划代码
+                    case 1 -> 12 * 256;  // 窗口编号
+                    case 2 -> 18 * 256;  // 窗口名称
+                    default -> 42 * 256; // 支持业务类型
+                });
+            }
+
+            // 查询要导出的窗口
+            List<Counter> counters;
+            if (counterIds == null || counterIds.isEmpty()) {
+                // 导出所有有权限的窗口
+                Set<Long> allowedRegionIds = authContextService.resolveAllowedRegionIds(currentUser);
+                if (allowedRegionIds == null) {
+                    counters = counterMapper.selectList(null);
+                } else if (allowedRegionIds.isEmpty()) {
+                    counters = Collections.emptyList();
+                } else {
+                    counters = counterMapper.selectList(
+                            new QueryWrapper<Counter>().in("region_id", allowedRegionIds)
+                    );
+                }
+            } else {
+                counters = counterMapper.selectBatchIds(counterIds);
+                // 过滤权限
+                Set<Long> allowedRegionIds = authContextService.resolveAllowedRegionIds(currentUser);
+                if (allowedRegionIds != null && !allowedRegionIds.isEmpty()) {
+                    counters = counters.stream()
+                            .filter(c -> allowedRegionIds.contains(c.getRegionId()))
+                            .collect(Collectors.toList());
+                }
+            }
+
+            // 按区域ID和窗口编号排序
+            counters.sort((c1, c2) -> {
+                int regionCompare = c1.getRegionId().compareTo(c2.getRegionId());
+                if (regionCompare != 0) return regionCompare;
+                return c1.getNumber().compareTo(c2.getNumber());
+            });
+
+            // 构建区域ID到区域的映射
+            Set<Long> regionIds = counters.stream().map(Counter::getRegionId).collect(Collectors.toSet());
+            Map<Long, Region> regionMap = Collections.emptyMap();
+            if (!regionIds.isEmpty()) {
+                regionMap = regionService.listAll().stream()
+                        .filter(r -> regionIds.contains(r.getId()))
+                        .collect(Collectors.toMap(Region::getId, r -> r));
+            }
+
+            // 加载所有业务类型
+            Map<Long, BusinessType> businessTypeMap = businessTypeMapper.selectList(null).stream()
+                    .collect(Collectors.toMap(BusinessType::getId, bt -> bt));
+
+            // 填充数据
+            int rowNum = 1;
+            for (Counter counter : counters) {
+                Row row = dataSheet.createRow(rowNum++);
+
+                // 所属区域区划代码
+                Region region = regionMap.get(counter.getRegionId());
+                String regionCode = region != null && region.getRegionCode() != null ? region.getRegionCode() : "";
+                row.createCell(0).setCellValue(regionCode);
+
+                // 窗口编号
+                row.createCell(1).setCellValue(counter.getNumber() != null ? counter.getNumber().toString() : "");
+
+                // 窗口名称
+                row.createCell(2).setCellValue(counter.getName() != null ? counter.getName() : "");
+
+                // 支持业务类型
+                List<Long> businessTypeIds = counterBusinessMapper.selectBusinessTypeIdsByCounterId(counter.getId());
+                if (!businessTypeIds.isEmpty()) {
+                    List<String> businessTypeNames = businessTypeIds.stream()
+                            .map(businessTypeMap::get)
+                            .filter(Objects::nonNull)
+                            .map(BusinessType::getName)
+                            .collect(Collectors.toList());
+                    row.createCell(3).setCellValue(String.join(",", businessTypeNames));
+                } else {
+                    row.createCell(3).setCellValue("");
+                }
+            }
+
+            workbook.write(outputStream);
+            return outputStream.toByteArray();
+        } catch (Exception e) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "导出窗口配置失败: " + e.getMessage());
+        }
     }
 
     // Ticket list for admin

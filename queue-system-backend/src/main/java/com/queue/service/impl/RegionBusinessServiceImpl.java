@@ -203,4 +203,13 @@ public class RegionBusinessServiceImpl implements RegionBusinessService {
         rb.setSortOrder(sortOrder);
         regionBusinessMapper.updateById(rb);
     }
+
+    @Override
+    public List<RegionBusiness> listByRegionId(Long regionId) {
+        return regionBusinessMapper.selectList(
+                new LambdaQueryWrapper<RegionBusiness>()
+                        .eq(RegionBusiness::getRegionId, regionId)
+                        .orderByAsc(RegionBusiness::getSortOrder)
+        );
+    }
 }

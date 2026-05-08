@@ -6,11 +6,13 @@ import com.queue.dto.PasswordResetConfirmRequest;
 import com.queue.dto.PasswordResetRequest;
 import com.queue.dto.RegisterRequest;
 import com.queue.dto.SysUserDTO;
+import com.queue.dto.UserImportResult;
 import com.queue.dto.UserMenuSortDTO;
 import com.queue.dto.UserPermissionDTO;
 import com.queue.entity.SysButton;
 import com.queue.entity.SysMenu;
 import com.queue.entity.SysUser;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -45,4 +47,8 @@ public interface SysUserService {
 
     List<Long> getUserRegionScopes(Long operatorId, Long targetUserId);
     void setUserRegionScopes(Long operatorId, Long targetUserId, List<Long> regionIds);
+
+    // 批量导入
+    byte[] generateImportTemplate();
+    UserImportResult importUsers(MultipartFile file, SysUser currentUser);
 }

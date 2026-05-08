@@ -2,6 +2,7 @@ package com.queue.service;
 
 import com.queue.dto.RegionBusinessDTO;
 import com.queue.entity.BusinessType;
+import com.queue.entity.RegionBusiness;
 
 import java.util.List;
 
@@ -45,4 +46,9 @@ public interface RegionBusinessService {
      * 更新区域内业务排序
      */
     void updateSortOrder(Long regionId, Long businessTypeId, Integer sortOrder);
+
+    /**
+     * 获取区域的业务关联记录（用于导出）
+     */
+    List<RegionBusiness> listByRegionId(Long regionId);
 }

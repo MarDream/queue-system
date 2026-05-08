@@ -165,7 +165,7 @@
           :total="filteredCounterStats.length"
           :page-sizes="[10, 20, 50, 100]"
           layout="total, sizes, prev, pager, next, jumper"
-          small
+          size="small"
         />
       </div>
     </el-dialog>

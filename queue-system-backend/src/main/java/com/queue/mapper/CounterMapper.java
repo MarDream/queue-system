@@ -25,4 +25,10 @@ public interface CounterMapper extends BaseMapper<Counter> {
             "<foreach collection='ticketIds' item='ticketId' open='(' separator=',' close=')'>#{ticketId}</foreach>" +
             "</script>")
     int resetCurrentAssignments(@Param("ticketIds") List<Long> ticketIds);
+
+    /**
+     * 物理删除指定区域的所有窗口
+     */
+    @Delete("DELETE FROM counter WHERE region_id = #{regionId}")
+    int physicalDeleteByRegionId(@Param("regionId") Long regionId);
 }

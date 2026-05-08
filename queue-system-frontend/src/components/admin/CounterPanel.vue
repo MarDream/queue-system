@@ -43,6 +43,9 @@
           <el-button :loading="downloadingTemplate" @click="showImportTemplateNotice">
             <el-icon class="btn-i"><Download /></el-icon> 批量导入模板
           </el-button>
+          <el-button :loading="exportingCounters" @click="handleExport">
+            <el-icon class="btn-i"><Download /></el-icon> 批量导出
+          </el-button>
           <el-upload
             ref="importUploadRef"
             class="inline-upload"
@@ -182,7 +185,7 @@
           :total="filteredCounters.length"
           :page-sizes="[10, 20, 50, 100]"
           layout="total, sizes, prev, pager, next, jumper"
-          small
+          size="small"
         />
       </div>
     </div>
@@ -390,6 +393,7 @@ const formRef = ref(null)
 const importUploadRef = ref(null)
 const downloadingTemplate = ref(false)
 const importingCounters = ref(false)
+const exportingCounters = ref(false)
 
 const formRules = {
   regionId: [{ required: true, message: '请选择所属区域', trigger: 'change' }],
@@ -696,6 +700,29 @@ async function handleImportFile(file) {
   } finally {
     importingCounters.value = false
     clearImportFiles()
+  }
+}
+
+async function handleExport() {
+  exportingCounters.value = true
+  try {
+    const response = await request.get('/admin/counters/export', {
+      responseType: 'blob'
+    })
+    const blob = new Blob([response], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `counters_export_${Date.now()}.xlsx`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+    ElMessage.success('窗口配置导出成功')
+  } catch (e) {
+    ElMessage.error(e.message || '导出失败')
+  } finally {
+    exportingCounters.value = false
   }
 }
 

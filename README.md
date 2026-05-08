@@ -27,6 +27,12 @@ queue-system/
 └── docs/                          # PRD 等文档
 ```
 
+## 文档入口
+
+- 当前项目主文档：`docs/完整需求文档.md`
+- 当前专题文档目录：`docs/topics/`
+- 历史归档目录：`docs/archive/`
+
 ## 本地开发
 
 ### 1) 启动 MySQL / Redis

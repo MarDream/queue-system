@@ -9,6 +9,7 @@ import com.queue.dto.PasswordResetConfirmRequest;
 import com.queue.dto.PasswordResetRequest;
 import com.queue.dto.RegisterRequest;
 import com.queue.dto.SysUserDTO;
+import com.queue.dto.UserImportResult;
 import com.queue.dto.UserMenuSortDTO;
 import com.queue.dto.UserPermissionDTO;
 import com.queue.config.ServerConfig;
@@ -29,6 +30,12 @@ import com.queue.service.SysUserService;
 import com.queue.util.JwtUtil;
 import com.queue.util.PasswordUtil;
 import lombok.RequiredArgsConstructor;
+import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.core.env.Environment;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.mail.SimpleMailMessage;
@@ -36,13 +43,18 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayOutputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -72,6 +84,7 @@ public class SysUserServiceImpl implements SysUserService {
     private static final String PWD_RESET_CODE_KEY_PREFIX = "pwdreset:code:";
     private static final String PWD_RESET_SENT_KEY_PREFIX = "pwdreset:sent:";
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+    private static final String[] IMPORT_HEADERS = {"用户名", "姓名", "邮箱", "角色", "区域代码", "初始密码", "状态"};
 
     @Override
     public LoginVO login(LoginRequest request) {
@@ -504,7 +517,8 @@ public class SysUserServiceImpl implements SysUserService {
             mailSender.send(msg);
         } catch (Exception e) {
             stringRedisTemplate.delete(key);
-            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "邮件发送失败，请联系管理员配置邮件服务");
+            e.printStackTrace();
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "邮件发送失败: " + e.getMessage());
         }
     }
 
@@ -1010,5 +1024,363 @@ public class SysUserServiceImpl implements SysUserService {
         if ("REGION_ADMIN".equals(operator.getRole()) && !"WINDOW_OPERATOR".equals(target.getRole())) {
             throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "只能为窗口操作员配置区域范围");
         }
+    }
+
+    @Override
+    public byte[] generateImportTemplate() {
+        try (Workbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+            Sheet templateSheet = workbook.createSheet("用户导入模板");
+            Row headerRow = templateSheet.createRow(0);
+            for (int i = 0; i < IMPORT_HEADERS.length; i++) {
+                headerRow.createCell(i).setCellValue(IMPORT_HEADERS[i]);
+                templateSheet.setColumnWidth(i, switch (i) {
+                    case 0 -> 18 * 256;
+                    case 1 -> 18 * 256;
+                    case 2 -> 25 * 256;
+                    case 3 -> 18 * 256;
+                    case 4 -> 18 * 256;
+                    case 5 -> 18 * 256;
+                    default -> 15 * 256;
+                });
+            }
+
+            Sheet exampleSheet = workbook.createSheet("示例数据");
+            Row exampleHeaderRow = exampleSheet.createRow(0);
+            for (int i = 0; i < IMPORT_HEADERS.length; i++) {
+                exampleHeaderRow.createCell(i).setCellValue(IMPORT_HEADERS[i]);
+                exampleSheet.setColumnWidth(i, templateSheet.getColumnWidth(i));
+            }
+            String[][] exampleRows = {
+                    {"zhangsan", "张三", "zhangsan@example.com", "WINDOW_OPERATOR", "440300", "Pass123456", "待激活"},
+                    {"lisi", "李四", "lisi@example.com", "WINDOW_OPERATOR", "440305", "", "已激活"},
+                    {"wangwu", "王五", "", "REGION_ADMIN", "440300", "Admin@2024", "已激活"}
+            };
+            for (int i = 0; i < exampleRows.length; i++) {
+                Row row = exampleSheet.createRow(i + 1);
+                for (int j = 0; j < exampleRows[i].length; j++) {
+                    row.createCell(j).setCellValue(exampleRows[i][j]);
+                }
+            }
+
+            Sheet roleSheet = workbook.createSheet("角色参照");
+            String[][] roleReference = {
+                    {"角色编码", "角色名称", "说明"},
+                    {"SUPER_ADMIN", "超级管理员", "拥有系统所有权限"},
+                    {"REGION_ADMIN", "区域管理员", "管理指定区域的用户和窗口"},
+                    {"WINDOW_OPERATOR", "窗口操作员", "操作窗口叫号和服务"}
+            };
+            for (int i = 0; i < roleReference.length; i++) {
+                Row row = roleSheet.createRow(i);
+                for (int j = 0; j < roleReference[i].length; j++) {
+                    row.createCell(j).setCellValue(roleReference[i][j]);
+                }
+            }
+            roleSheet.setColumnWidth(0, 20 * 256);
+            roleSheet.setColumnWidth(1, 18 * 256);
+            roleSheet.setColumnWidth(2, 35 * 256);
+
+            Sheet instructionSheet = workbook.createSheet("填写说明");
+            String[][] instructions = {
+                    {"字段", "说明"},
+                    {"用户名", "必填,长度建议不超过 50 字,必须唯一."},
+                    {"姓名", "必填,长度建议不超过 50 字."},
+                    {"邮箱", "选填,必须唯一,用于密码重置."},
+                    {"角色", "必填,填写角色编码,如 WINDOW_OPERATOR,详见【角色参照】工作表."},
+                    {"区域代码", "必填,必须是系统中已存在的区域代码,如 440300."},
+                    {"初始密码", "选填,留空时系统自动生成随机密码.密码至少6位."},
+                    {"状态", "选填,支持 待激活/已激活/已禁用,留空默认为待激活."},
+                    {"权限规则", "超级管理员可导入所有区域用户;区域管理员只能导入其管理区域范围内的用户."},
+                    {"角色限制", "区域管理员不能导入 REGION_ADMIN 角色的用户."},
+                    {"示例1", "zhangsan | 张三 | zhangsan@example.com | WINDOW_OPERATOR | 440300 | Pass123456 | 待激活"},
+                    {"示例2", "lisi | 李四 | lisi@example.com | WINDOW_OPERATOR | 440305 |  | 已激活"},
+                    {"示例3", "wangwu | 王五 |  | REGION_ADMIN | 440300 | Admin@2024 | 已激活"}
+            };
+            for (int i = 0; i < instructions.length; i++) {
+                Row row = instructionSheet.createRow(i);
+                row.createCell(0).setCellValue(instructions[i][0]);
+                row.createCell(1).setCellValue(instructions[i][1]);
+            }
+            instructionSheet.setColumnWidth(0, 18 * 256);
+            instructionSheet.setColumnWidth(1, 80 * 256);
+
+            workbook.write(outputStream);
+            return outputStream.toByteArray();
+        } catch (Exception e) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "生成导入模板失败");
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public UserImportResult importUsers(MultipartFile file, SysUser currentUser) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(400, "请先选择要导入的 Excel 文件");
+        }
+
+        if (currentUser == null) {
+            throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "请先登录");
+        }
+
+        if (!"SUPER_ADMIN".equals(currentUser.getRole()) && !"REGION_ADMIN".equals(currentUser.getRole())) {
+            throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "仅管理员角色可以批量导入用户");
+        }
+
+        try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
+            if (workbook.getNumberOfSheets() == 0) {
+                throw new BusinessException(400, "导入文件缺少数据工作表");
+            }
+
+            Sheet sheet = workbook.getSheet("用户导入模板");
+            if (sheet == null) {
+                sheet = workbook.getSheetAt(0);
+            }
+
+            DataFormatter formatter = new DataFormatter();
+            validateImportHeader(sheet.getRow(0), formatter);
+            List<UserImportRow> importRows = parseImportRows(sheet, formatter);
+            if (importRows.isEmpty()) {
+                throw new BusinessException(400, "导入文件中没有可导入的数据");
+            }
+
+            List<Long> allowedRegionIds = getAllowedRegionIdsForImport(currentUser);
+            Map<String, SysUser> existingUsersByUsername = loadExistingUsersByUsername();
+            Map<String, SysUser> existingUsersByEmail = loadExistingUsersByEmail();
+
+            List<UserImportResult.UserImportDetail> details = new ArrayList<>();
+            int importedCount = 0;
+
+            for (UserImportRow importRow : importRows) {
+                validateImportRow(importRow, currentUser, allowedRegionIds, existingUsersByUsername, existingUsersByEmail);
+
+                String password = StringUtils.hasText(importRow.password())
+                        ? importRow.password()
+                        : com.queue.util.PasswordUtil.generateRandomPassword(10);
+
+                SysUserDTO dto = new SysUserDTO();
+                dto.setUsername(importRow.username());
+                dto.setPassword(password);
+                dto.setName(importRow.name());
+                dto.setEmail(StringUtils.hasText(importRow.email()) ? importRow.email() : null);
+                dto.setRole(importRow.role());
+                dto.setRegionId(importRow.regionId());
+                dto.setStatus(importRow.status());
+
+                SysUser created = create(dto);
+                existingUsersByUsername.put(created.getUsername(), created);
+                if (created.getEmail() != null) {
+                    existingUsersByEmail.put(created.getEmail(), created);
+                }
+
+                if (!StringUtils.hasText(importRow.password())) {
+                    details.add(new UserImportResult.UserImportDetail(created.getUsername(), password));
+                }
+
+                importedCount++;
+            }
+
+            return new UserImportResult(importedCount, details);
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "读取 Excel 失败,请使用系统模板并上传 .xlsx 或 .xls 文件");
+        }
+    }
+
+    private void validateImportHeader(Row headerRow, DataFormatter formatter) {
+        if (headerRow == null) {
+            throw new BusinessException(400, "导入文件缺少表头,请先下载模板");
+        }
+        for (int i = 0; i < IMPORT_HEADERS.length; i++) {
+            String actual = formatter.formatCellValue(headerRow.getCell(i)).trim();
+            if (!IMPORT_HEADERS[i].equals(actual)) {
+                throw new BusinessException(400, "模板表头不正确,请先下载最新模板");
+            }
+        }
+    }
+
+    private List<UserImportRow> parseImportRows(Sheet sheet, DataFormatter formatter) {
+        List<UserImportRow> rows = new ArrayList<>();
+        Set<String> batchUsernames = new HashSet<>();
+
+        for (int rowIndex = 1; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
+            Row row = sheet.getRow(rowIndex);
+            if (row == null) {
+                continue;
+            }
+
+            String username = formatter.formatCellValue(row.getCell(0)).trim();
+            String name = formatter.formatCellValue(row.getCell(1)).trim();
+            String email = formatter.formatCellValue(row.getCell(2)).trim();
+            String role = formatter.formatCellValue(row.getCell(3)).trim();
+            String regionCode = formatter.formatCellValue(row.getCell(4)).trim();
+            String password = formatter.formatCellValue(row.getCell(5)).trim();
+            String statusText = formatter.formatCellValue(row.getCell(6)).trim();
+
+            if (!StringUtils.hasText(username)
+                    && !StringUtils.hasText(name)
+                    && !StringUtils.hasText(email)
+                    && !StringUtils.hasText(role)
+                    && !StringUtils.hasText(regionCode)
+                    && !StringUtils.hasText(password)
+                    && !StringUtils.hasText(statusText)) {
+                continue;
+            }
+
+            int displayRowNum = rowIndex + 1;
+            if (!StringUtils.hasText(username)) {
+                throw new BusinessException(400, "第 " + displayRowNum + " 行缺少用户名");
+            }
+            if (!StringUtils.hasText(name)) {
+                throw new BusinessException(400, "第 " + displayRowNum + " 行缺少姓名");
+            }
+            if (!StringUtils.hasText(role)) {
+                throw new BusinessException(400, "第 " + displayRowNum + " 行缺少角色");
+            }
+            if (!StringUtils.hasText(regionCode)) {
+                throw new BusinessException(400, "第 " + displayRowNum + " 行缺少区域代码");
+            }
+            if (username.length() > 50) {
+                throw new BusinessException(400, "第 " + displayRowNum + " 行用户名长度不能超过 50");
+            }
+            if (name.length() > 50) {
+                throw new BusinessException(400, "第 " + displayRowNum + " 行姓名长度不能超过 50");
+            }
+            if (!batchUsernames.add(username)) {
+                throw new BusinessException(400, "第 " + displayRowNum + " 行用户名重复: " + username);
+            }
+            if (StringUtils.hasText(password) && password.length() < 6) {
+                throw new BusinessException(400, "第 " + displayRowNum + " 行密码至少6位");
+            }
+
+            Long regionId = findRegionIdByCode(regionCode, displayRowNum);
+            String normalizedRole = normalizeRole(role, displayRowNum);
+            Integer status = normalizeStatus(statusText, displayRowNum);
+
+            rows.add(new UserImportRow(
+                    displayRowNum,
+                    username,
+                    name,
+                    StringUtils.hasText(email) ? email.trim().toLowerCase() : null,
+                    normalizedRole,
+                    regionId,
+                    regionCode,
+                    StringUtils.hasText(password) ? password : null,
+                    status
+            ));
+        }
+
+        return rows;
+    }
+
+    private Long findRegionIdByCode(String regionCode, int displayRowNum) {
+        Region region = regionMapper.selectOne(new LambdaQueryWrapper<Region>()
+                .eq(Region::getRegionCode, regionCode)
+                .eq(Region::getDeleted, 0));
+        if (region == null) {
+            throw new BusinessException(400, "第 " + displayRowNum + " 行区域代码不存在: " + regionCode);
+        }
+        return region.getId();
+    }
+
+    private Long parseRegionId(String regionIdText, int displayRowNum) {
+        try {
+            return Long.parseLong(regionIdText);
+        } catch (NumberFormatException e) {
+            throw new BusinessException(400, "第 " + displayRowNum + " 行区域ID必须为数字");
+        }
+    }
+
+    private String normalizeRole(String roleText, int displayRowNum) {
+        if (!StringUtils.hasText(roleText)) {
+            throw new BusinessException(400, "第 " + displayRowNum + " 行缺少角色");
+        }
+        String normalized = roleText.trim().toUpperCase();
+        return switch (normalized) {
+            case "SUPER_ADMIN", "超级管理员" -> "SUPER_ADMIN";
+            case "REGION_ADMIN", "区域管理员" -> "REGION_ADMIN";
+            case "WINDOW_OPERATOR", "窗口操作员" -> "WINDOW_OPERATOR";
+            default -> throw new BusinessException(400, "第 " + displayRowNum + " 行角色无效,请填写 SUPER_ADMIN/REGION_ADMIN/WINDOW_OPERATOR 或对应中文");
+        };
+    }
+
+    private Integer normalizeStatus(String statusText, int displayRowNum) {
+        if (!StringUtils.hasText(statusText)) {
+            return USER_STATUS_PENDING;
+        }
+        String normalized = statusText.trim();
+        return switch (normalized) {
+            case "待激活", "0" -> USER_STATUS_PENDING;
+            case "已激活", "1" -> USER_STATUS_ACTIVE;
+            case "已禁用", "2" -> USER_STATUS_DISABLED;
+            default -> throw new BusinessException(400, "第 " + displayRowNum + " 行状态无效,请填写 待激活/已激活/已禁用");
+        };
+    }
+
+    private List<Long> getAllowedRegionIdsForImport(SysUser currentUser) {
+        if ("SUPER_ADMIN".equals(currentUser.getRole())) {
+            return null;
+        }
+        return getAllowedRegionIds(currentUser.getRegionId());
+    }
+
+    private Map<String, SysUser> loadExistingUsersByUsername() {
+        List<SysUser> allUsers = listAll();
+        Map<String, SysUser> map = new HashMap<>();
+        for (SysUser user : allUsers) {
+            if (StringUtils.hasText(user.getUsername())) {
+                map.put(user.getUsername().trim(), user);
+            }
+        }
+        return map;
+    }
+
+    private Map<String, SysUser> loadExistingUsersByEmail() {
+        List<SysUser> allUsers = listAll();
+        Map<String, SysUser> map = new HashMap<>();
+        for (SysUser user : allUsers) {
+            if (StringUtils.hasText(user.getEmail())) {
+                map.put(user.getEmail().trim().toLowerCase(), user);
+            }
+        }
+        return map;
+    }
+
+    private void validateImportRow(UserImportRow importRow, SysUser currentUser, List<Long> allowedRegionIds,
+                                    Map<String, SysUser> existingUsersByUsername, Map<String, SysUser> existingUsersByEmail) {
+        if (existingUsersByUsername.containsKey(importRow.username())) {
+            throw new BusinessException(400, "第 " + importRow.rowNum() + " 行用户名已存在: " + importRow.username());
+        }
+
+        if (importRow.email() != null && existingUsersByEmail.containsKey(importRow.email())) {
+            throw new BusinessException(400, "第 " + importRow.rowNum() + " 行邮箱已存在: " + importRow.email());
+        }
+
+        Region region = regionMapper.selectById(importRow.regionId());
+        if (region == null) {
+            throw new BusinessException(400, "第 " + importRow.rowNum() + " 行区域ID不存在: " + importRow.regionId());
+        }
+
+        if ("REGION_ADMIN".equals(currentUser.getRole())) {
+            if ("REGION_ADMIN".equals(importRow.role())) {
+                throw new BusinessException(403, "第 " + importRow.rowNum() + " 行区域管理员不能导入 REGION_ADMIN 角色");
+            }
+            if (allowedRegionIds != null && !allowedRegionIds.contains(importRow.regionId())) {
+                throw new BusinessException(403, "第 " + importRow.rowNum() + " 行无权限导入该区域的用户: " + region.getRegionName());
+            }
+        }
+    }
+
+    private record UserImportRow(
+            int rowNum,
+            String username,
+            String name,
+            String email,
+            String role,
+            Long regionId,
+            String regionCode,
+            String password,
+            Integer status
+    ) {
     }
 }

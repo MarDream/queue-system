@@ -2,8 +2,9 @@ package com.queue.controller;
 
 import com.queue.common.Result;
 import com.queue.common.ResultCode;
-import com.queue.dto.SysUserDTO;
 import com.queue.dto.ResetPasswordRequest;
+import com.queue.dto.SysUserDTO;
+import com.queue.dto.UserImportResult;
 import com.queue.dto.UserPermissionDTO;
 import com.queue.entity.SysButton;
 import com.queue.entity.SysMenu;
@@ -12,8 +13,12 @@ import com.queue.service.SysUserService;
 import com.queue.util.PasswordUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -206,5 +211,32 @@ public class SysUserController {
         Long operatorId = (Long) request.getAttribute("userId");
         sysUserService.setUserRegionScopes(operatorId, id, regionIds);
         return Result.ok();
+    }
+
+    /**
+     * 下载用户批量导入模板
+     */
+    @GetMapping("/import/template")
+    public ResponseEntity<byte[]> downloadImportTemplate() {
+        byte[] template = sysUserService.generateImportTemplate();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"user_import_template.xlsx\"")
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .body(template);
+    }
+
+    /**
+     * 批量导入用户
+     */
+    @PostMapping("/import")
+    public Result<UserImportResult> importUsers(@RequestParam("file") MultipartFile file,
+                                                HttpServletRequest request) {
+        Long operatorId = (Long) request.getAttribute("userId");
+        SysUser currentUser = operatorId == null ? null : sysUserService.getById(operatorId);
+        if (currentUser == null) {
+            return Result.error(ResultCode.UNAUTHORIZED.getCode(), "请先登录");
+        }
+        UserImportResult result = sysUserService.importUsers(file, currentUser);
+        return Result.ok(result);
     }
 }

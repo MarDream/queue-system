@@ -123,7 +123,7 @@ public class RegionController {
         return Result.ok(regionService.listByParentId(parentId));
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/{id:[0-9]+}")
     public Result<Region> getById(@PathVariable Long id) {
         return Result.ok(regionService.getById(id));
     }
@@ -152,6 +152,18 @@ public class RegionController {
     public Result<RegionImportResult> importRegions(@RequestPart("file") MultipartFile file, HttpServletRequest request) {
         SysUser currentUser = authContextService.requireCurrentUser(request);
         return Result.ok(regionService.importRegions(file, currentUser));
+    }
+
+    @GetMapping("/export")
+    public void exportRegions(@RequestParam(required = false) List<Long> regionIds,
+                              HttpServletRequest request,
+                              HttpServletResponse response) throws IOException {
+        authContextService.requireCurrentUser(request);
+        byte[] content = regionService.exportRegions(regionIds);
+        String filename = "regions_export_" + System.currentTimeMillis() + ".xlsx";
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setHeader("Content-Disposition", "attachment;filename=" + URLEncoder.encode(filename, StandardCharsets.UTF_8));
+        response.getOutputStream().write(content);
     }
 
     @PostMapping

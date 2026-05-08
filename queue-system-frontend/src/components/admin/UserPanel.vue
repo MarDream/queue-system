@@ -52,6 +52,23 @@
         />
       </div>
       <div class="filter-actions">
+        <el-button v-if="isAdmin" :loading="downloadingTemplate" @click="downloadTemplate">
+          <el-icon class="btn-i"><Download /></el-icon> 批量导入模板
+        </el-button>
+        <el-upload
+          v-if="isAdmin"
+          ref="importUploadRef"
+          class="inline-upload"
+          :auto-upload="false"
+          :show-file-list="false"
+          :disabled="importingUsers"
+          accept=".xlsx,.xls"
+          :on-change="handleImportFile"
+        >
+          <el-button type="success" :loading="importingUsers">
+            <el-icon class="btn-i"><Upload /></el-icon> 批量导入
+          </el-button>
+        </el-upload>
         <el-button type="primary" @click="openCreate">
           <el-icon class="btn-i"><Plus /></el-icon> 新增用户
         </el-button>
@@ -250,8 +267,9 @@
 
 <script setup>
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Download, Upload } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import axios from 'axios'
 import request from '../../api/index'
 import { userPermissionApi } from '../../api/admin'
 import { useUserStore } from '../../stores/user'
@@ -284,6 +302,16 @@ const isEdit = ref(false)
 const saving = ref(false)
 const searchKeyword = ref('')
 const filterRegionId = ref(null)
+
+// 批量导入相关
+const downloadingTemplate = ref(false)
+const importingUsers = ref(false)
+const importUploadRef = ref(null)
+
+// 判断是否为管理员
+const isAdmin = computed(() => {
+  return userStore.isSuperAdmin || userStore.isRegionAdmin
+})
 
 // 权限配置相关
 const permDialogVisible = ref(false)
@@ -801,6 +829,141 @@ function formatTime(time) {
   return time
 }
 
+// ==================== 批量导入 ====================
+
+/**
+ * 下载批量导入模板
+ */
+async function downloadTemplate() {
+  downloadingTemplate.value = true
+  try {
+    const token = localStorage.getItem('token')
+    const response = await axios.get('/api/v1/admin/users/import/template', {
+      responseType: 'blob',
+      headers: {
+        Authorization: token ? `Bearer ${token}` : ''
+      }
+    })
+
+    const blob = new Blob([response.data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'user_import_template.xlsx'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+
+    ElMessage.success('模板下载成功')
+  } catch (error) {
+    console.error('下载模板失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '下载模板失败')
+  } finally {
+    downloadingTemplate.value = false
+  }
+}
+
+/**
+ * 处理导入文件选择
+ */
+async function handleImportFile(uploadFile) {
+  if (!uploadFile || !uploadFile.raw) {
+    return
+  }
+
+  const file = uploadFile.raw
+  const isExcel = file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    || file.type === 'application/vnd.ms-excel'
+    || file.name.endsWith('.xlsx')
+    || file.name.endsWith('.xls')
+
+  if (!isExcel) {
+    ElMessage.error('只能上传 Excel 文件（.xlsx 或 .xls）')
+    return
+  }
+
+  const isLt10M = file.size / 1024 / 1024 < 10
+  if (!isLt10M) {
+    ElMessage.error('文件大小不能超过 10MB')
+    return
+  }
+
+  // 确认导入
+  try {
+    await ElMessageBox.confirm(
+      '确定要导入该文件中的用户数据吗？',
+      '批量导入确认',
+      {
+        confirmButtonText: '确定导入',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    // 用户取消
+    if (importUploadRef.value) {
+      importUploadRef.value.clearFiles()
+    }
+    return
+  }
+
+  // 执行导入
+  importingUsers.value = true
+  const formData = new FormData()
+  formData.append('file', file)
+
+  try {
+    const result = await request.post('/admin/users/import', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+
+    // 显示导入结果
+    if (result.details && result.details.length > 0) {
+      // 有自动生成的密码，需要展示给用户
+      showImportResult(result)
+    } else {
+      ElMessage.success(`成功导入 ${result.importedCount} 个用户`)
+    }
+
+    // 刷新用户列表
+    await fetchList()
+
+  } catch (error) {
+    console.error('导入失败:', error)
+    const errorMsg = error.message || '导入失败'
+    ElMessage.error(errorMsg)
+  } finally {
+    importingUsers.value = false
+    if (importUploadRef.value) {
+      importUploadRef.value.clearFiles()
+    }
+  }
+}
+
+/**
+ * 显示导入结果（包含自动生成的密码）
+ */
+function showImportResult(result) {
+  const passwordList = result.details
+    .map(d => `${d.username}: ${d.generatedPassword}`)
+    .join('\n')
+
+  ElMessageBox.alert(
+    `成功导入 ${result.importedCount} 个用户\n\n以下用户使用了自动生成的密码，请妥善保存：\n\n${passwordList}`,
+    '导入成功',
+    {
+      confirmButtonText: '我已保存',
+      type: 'success',
+      dangerouslyUseHTMLString: false
+    }
+  )
+}
+
 onMounted(() => {
   fetchList()
   fetchRegions()
@@ -1060,5 +1223,17 @@ onMounted(() => {
 .perm-name {
   font-weight: 500;
   color: var(--text-primary);
+}
+
+.inline-upload {
+  display: inline-block;
+}
+
+.inline-upload :deep(.el-upload) {
+  display: inline-block;
+}
+
+.btn-i {
+  margin-right: 4px;
 }
 </style>
