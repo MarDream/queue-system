@@ -206,6 +206,15 @@
             <span class="mono" style="font-size:11px;color:var(--text-muted)">{{ h.duration }}min</span>
           </div>
         </div>
+        <div v-if="historyTotalPages > 1" class="history-pagination">
+          <button class="page-arrow" :disabled="historyPage <= 1" @click="flipHistoryPage(-1)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <span class="page-indicator">{{ historyPage }} / {{ historyTotalPages }} 页</span>
+          <button class="page-arrow" :disabled="historyPage >= historyTotalPages" @click="flipHistoryPage(1)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -217,7 +226,7 @@ import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import { callNext, recall, skip, serve, complete, togglePause, getCounterSnapshot } from '../api/counter'
 import { counterApi } from '../api/admin'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { SwitchFilled, Location, UserFilled, Avatar, RefreshRight, ChatLineRound } from '@element-plus/icons-vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { getDisplayTicketNo } from '../utils/ticketUtils'
@@ -558,6 +567,15 @@ async function handleRecall() {
 
 async function handleSkip() {
   if (!counterId.value || !serving.value || completing.value) return
+  try {
+    await ElMessageBox.confirm(
+      '确认跳过该号码？跳过后需客户重新取号。',
+      '跳过确认',
+      { confirmButtonText: '确认跳过', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return // 用户取消
+  }
   const savedNum = serving.value.number
   const savedBiz = serving.value.biz
   const savedStatus = serving.value.status
@@ -764,14 +782,18 @@ async function handleLogout() {
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-3);
-  background: #fff;
+  background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
 
 .queue-next {
   border-color: rgba(0, 82, 217, 0.28);
-  background: var(--primary-light);
+  background: rgba(0, 82, 217, 0.08);
+  border-left: 4px solid var(--primary);
+}
+.queue-next .qi-number {
+  font-weight: 800;
 }
 
 .qi-seq { font-size: var(--text-xs); color: var(--text-muted); width: 20px; }
@@ -800,23 +822,48 @@ async function handleLogout() {
 .serving-card {
   width: 100%;
   max-width: 420px;
-  background: linear-gradient(180deg, #ffffff 0%, #f7faff 100%);
-  border: 1px solid rgba(0, 82, 217, 0.16);
-  border-top: 4px solid var(--primary);
+  background: linear-gradient(135deg, #0052d9, #0034b0);
+  border: 1px solid rgba(0, 52, 176, 0.3);
+  border-top: 4px solid rgba(255, 255, 255, 0.3);
   border-radius: var(--radius-md);
   padding: var(--sp-8);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--sp-3);
+  box-shadow: 0 4px 24px rgba(0, 82, 217, 0.3);
 }
 
-.sc-label { font-size: var(--text-xs); font-weight: 600; color: var(--text-muted); }
-.sc-number { font-size: clamp(48px, 5vw, 80px); color: var(--primary); line-height: 1; letter-spacing: 0.08em; }
-.sc-biz { font-size: var(--text-base); color: var(--text-secondary); }
+.sc-label { font-size: var(--text-xs); font-weight: 600; color: rgba(255, 255, 255, 0.7); }
+.sc-number { font-size: clamp(48px, 5vw, 80px); color: #fff; line-height: 1; letter-spacing: 0.08em; }
+.sc-biz { font-size: var(--text-base); color: rgba(255, 255, 255, 0.85); }
 .sc-status { display: flex; justify-content: center; }
-.sc-timer { font-size: var(--text-2xl); color: var(--text-primary); letter-spacing: 0.1em; }
+.sc-timer { font-size: var(--text-2xl); color: #fff; letter-spacing: 0.1em; }
 .sc-actions { display: flex; gap: var(--sp-3); margin-top: var(--sp-3); width: 100%; flex-wrap: wrap; }
+.sc-actions .action-btn {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+.sc-actions .action-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+.sc-actions .btn-serve,
+.sc-actions .btn-done {
+  background: #fff;
+  border-color: #fff;
+  color: var(--primary);
+}
+.sc-actions .btn-serve:hover,
+.sc-actions .btn-done:hover {
+  background: rgba(255, 255, 255, 0.85);
+  border-color: rgba(255, 255, 255, 0.85);
+}
+.sc-actions .recall-badge {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
 
 .action-btn {
   flex: 1;
@@ -832,7 +879,7 @@ async function handleLogout() {
   transition: all var(--duration-fast) var(--ease-out);
   border: 1px solid;
   min-height: var(--touch-md);
-  background: #fff;
+  background: var(--bg-card);
 }
 
 .btn-serve,
@@ -867,7 +914,7 @@ async function handleLogout() {
   align-items: center;
   justify-content: center;
   gap: var(--sp-3);
-  background: #f7f8fa;
+  background: var(--bg-panel);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-md);
   color: var(--text-muted);
@@ -903,7 +950,7 @@ async function handleLogout() {
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-3) var(--sp-6);
-  background: #fff;
+  background: var(--bg-card);
   border: 1px solid var(--warning);
   border-radius: var(--radius-md);
   color: var(--warning);
@@ -919,7 +966,7 @@ async function handleLogout() {
 
 .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); padding: var(--sp-4); }
 .stat-box {
-  background: #f7f8fa;
+  background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: var(--sp-4) var(--sp-3);
@@ -937,7 +984,7 @@ async function handleLogout() {
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
-  background: #f7f8fa;
+  background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }

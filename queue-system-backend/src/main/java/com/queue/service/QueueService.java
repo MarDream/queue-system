@@ -15,4 +15,9 @@ public interface QueueService {
     void releaseLock(String lockKey);
     void pushCompletedHistory(Long counterId, String json);
     List<String> getCompletedHistory(Long counterId);
+
+    /**
+     * 从数据库修正所有业务类型的 Redis 等待计数缓存
+     */
+    void reconcileWaitingCounts();
 }

@@ -180,8 +180,8 @@ public class BusinessTypeServiceImpl implements BusinessTypeService {
         counterBusinessMapper.delete(
             new QueryWrapper<CounterBusiness>().eq("business_type_id", id)
         );
-        // 物理删除（直接删除，不做软删除）
-        businessTypeMapper.physicalDeleteById(id);
+        // 逻辑删除（实体有 @TableLogic 注解，使用 MyBatis-Plus 逻辑删除保持一致）
+        businessTypeMapper.deleteById(id);
     }
 
     @Override

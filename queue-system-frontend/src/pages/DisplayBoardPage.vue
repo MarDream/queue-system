@@ -16,7 +16,7 @@
     <main class="board-main">
       <section class="panel calling-panel">
         <div class="panel-header">
-          <span class="panel-icon">🔔</span>
+          <span class="panel-icon"><el-icon :size="18"><Bell /></el-icon></span>
           <span class="panel-title">正在呼号（<span class="count-num">{{ callingQueue.length }}</span>人）</span>
         </div>
         <div class="panel-body">
@@ -33,7 +33,7 @@
             </div>
           </div>
           <div class="panel-empty" v-else>
-            <div class="empty-icon">📋</div>
+            <div class="empty-icon"><el-icon :size="32"><Document /></el-icon></div>
             <div class="empty-text">暂无呼号</div>
           </div>
         </div>
@@ -41,7 +41,7 @@
 
       <section class="panel waiting-panel">
         <div class="panel-header">
-          <span class="panel-icon">⏳</span>
+          <span class="panel-icon"><el-icon :size="18"><Timer /></el-icon></span>
           <span class="panel-title">等候中（<span class="count-num">{{ waitingQueue.length }}</span>人）</span>
         </div>
         <div class="panel-body">
@@ -52,7 +52,7 @@
             </div>
           </div>
           <div class="panel-empty" v-else>
-            <div class="empty-icon">📋</div>
+            <div class="empty-icon"><el-icon :size="32"><Document /></el-icon></div>
             <div class="empty-text">暂无人等候</div>
           </div>
         </div>
@@ -61,7 +61,7 @@
       <aside class="side-column">
         <section class="panel qrcode-panel">
           <div class="panel-header">
-            <span class="panel-icon">📱</span>
+            <span class="panel-icon"><el-icon :size="18"><Cellphone /></el-icon></span>
             <span class="panel-title">取号二维码</span>
           </div>
           <div class="panel-body qrcode-body">
@@ -69,7 +69,7 @@
               <img :src="qrcodeUrl" alt="取号二维码" class="qrcode-img" />
             </div>
             <div class="panel-empty" v-else>
-              <div class="empty-icon">📱</div>
+            <div class="empty-icon"><el-icon :size="32"><Cellphone /></el-icon></div>
               <div class="empty-text">二维码加载中...</div>
             </div>
           </div>
@@ -77,7 +77,7 @@
 
         <section class="panel skipped-panel">
           <div class="panel-header">
-            <span class="panel-icon">⏭</span>
+            <span class="panel-icon"><el-icon :size="18"><Right /></el-icon></span>
             <span class="panel-title">已过号（<span class="count-num">{{ skippedQueue.length }}</span>人）</span>
           </div>
           <div class="panel-body">
@@ -88,7 +88,7 @@
               </div>
             </div>
             <div class="panel-empty" v-else>
-              <div class="empty-icon">📋</div>
+            <div class="empty-icon"><el-icon :size="32"><Document /></el-icon></div>
               <div class="empty-text">暂无过号</div>
             </div>
           </div>
@@ -98,8 +98,8 @@
 
     <footer class="board-footer">
       <div class="notice-bar" v-if="notice">
-        <span class="notice-icon">📢</span>
-        <div class="notice-scroll"><span class="notice-text">{{ notice }}</span></div>
+        <span class="notice-icon"><el-icon :size="16"><Bell /></el-icon></span>
+        <div class="notice-scroll"><span class="notice-text">{{ notice }}&emsp;&emsp;&emsp;&emsp;{{ notice }}&emsp;&emsp;&emsp;&emsp;</span></div>
       </div>
       <div class="notice-bar empty" v-else>欢迎光临 {{ regionName || '本服务大厅' }}</div>
     </footer>
@@ -111,6 +111,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { getScreenData } from '../api/screen'
+import { Bell, Timer, Cellphone, Right, Document } from '@element-plus/icons-vue'
 
 const route = useRoute()
 
@@ -232,7 +233,7 @@ onUnmounted(() => {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #0d1b3a;
+  background: var(--screen-bg-dark);
   font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
 }
 
@@ -241,7 +242,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 12px 32px;
-  background: #0052d4;
+  background: var(--screen-accent);
   color: #fff;
   flex-shrink: 0;
 }
@@ -288,7 +289,7 @@ onUnmounted(() => {
 }
 
 .panel {
-  background: rgba(255,255,255,0.08);
+  background: var(--screen-panel-bg);
   backdrop-filter: blur(12px);
   border-radius: 8px;
   display: flex;
@@ -316,7 +317,7 @@ onUnmounted(() => {
   font-weight: 800;
   line-height: 1.2;
 }
-.count-num { color: #1e293b; font-weight: 800; }
+.count-num { color: var(--screen-text-dark); font-weight: 800; }
 .panel-body {
   flex: 1;
   overflow-y: auto;
@@ -324,7 +325,7 @@ onUnmounted(() => {
   min-height: 0;
 }
 
-.calling-panel .panel-header { background: #e8f0fe; color: #0052d4; }
+.calling-panel .panel-header { background: #e8f0fe; color: var(--screen-accent); }
 .waiting-panel .panel-header { background: #f3f0ff; color: #7c3aed; }
 .skipped-panel .panel-header { background: #fef3c7; color: #d97706; }
 .qrcode-panel .panel-header { background: #10b981; color: #fff; }
@@ -370,7 +371,7 @@ onUnmounted(() => {
   font-size: 26px;
   line-height: 1.2;
   border-radius: 6px;
-  background: rgba(30, 64, 175, 0.72);
+  background: var(--screen-calling-row-bg);
 }
 
 .calling-ticket {
@@ -406,7 +407,7 @@ onUnmounted(() => {
   font-size: 28px;
   line-height: 1;
   font-weight: 700;
-  color: #1e293b;
+  color: var(--screen-text-dark);
 }
 
 .waiting-business {
@@ -457,7 +458,7 @@ onUnmounted(() => {
 .skipped-ticket {
   font-size: 18px;
   font-weight: 700;
-  color: #1e293b;
+  color: var(--screen-text-dark);
 }
 
 .skipped-window {
@@ -476,13 +477,13 @@ onUnmounted(() => {
   color: #94a3b8;
 }
 
-.empty-icon { font-size: 32px; opacity: 0.5; }
+.empty-icon { font-size: 32px; opacity: 0.5; color: #94a3b8; }
 .empty-text { font-size: 14px; }
 
 .board-footer {
   flex-shrink: 0;
-  background: #1e293b;
-  color: #94a3b8;
+  background: var(--screen-footer-bg);
+  color: var(--screen-text-muted);
   padding: 8px 24px;
   display: flex;
   align-items: center;
@@ -501,15 +502,15 @@ onUnmounted(() => {
 .notice-text {
   display: inline-block;
   animation: notice-scroll 20s linear infinite;
-  color: #94a3b8;
+  color: var(--screen-text-muted);
 }
 
 @keyframes notice-scroll {
   0% {
-    transform: translateX(100%);
+    transform: translateX(0%);
   }
   100% {
-    transform: translateX(-100%);
+    transform: translateX(-50%);
   }
 }
 

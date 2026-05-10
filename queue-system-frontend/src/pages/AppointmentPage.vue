@@ -7,6 +7,13 @@
     </div>
 
     <div class="content">
+      <!-- 步骤条导航 -->
+      <el-steps v-if="!error" :active="stepIndex" align-center class="steps-nav">
+        <el-step title="查询" />
+        <el-step title="取号" />
+        <el-step title="完成" />
+      </el-steps>
+
       <!-- 错误状态：无效区域 -->
       <div v-if="error" class="error-state">
         <div class="error-icon">!</div>
@@ -14,128 +21,168 @@
         <button class="btn-secondary" @click="retry">重试</button>
       </div>
 
-      <!-- 阶段1：手机号查询 -->
-      <div v-else-if="pageState === 'query'" class="query-section">
-        <p class="query-desc">请输入手机号码查询排队情况，或取新号</p>
-        <div class="form-group">
-          <label>手机号码</label>
-          <input
-            v-model="phone"
-            type="tel"
-            class="input"
-            placeholder="请输入手机号码"
-            maxlength="11"
-            @keyup.enter="checkActiveTicket"
-          />
-        </div>
-        <div class="action-row">
-          <button
-            class="btn-primary"
-            :disabled="!phoneValid || queryLoading"
-            @click="checkActiveTicket"
-          >
-            {{ queryLoading ? '查询中...' : '查询排队' }}
-          </button>
-        </div>
-        <div class="action-row" style="margin-top: var(--sp-3);">
-          <button class="btn-secondary" @click="goToTicketForm">跳过，直接取号</button>
-        </div>
-      </div>
-
-      <!-- 阶段2a：有未完成票据 → 显示排队进度 -->
-      <div v-else-if="pageState === 'tracking'" class="tracking-section">
-        <div class="status-badge" :class="activeTicket.status?.toLowerCase()">
-          {{ activeTicket.statusText || '等待中' }}
-        </div>
-        <div class="ticket-card">
-          <div class="ticket-no">{{ getDisplayTicketNo(activeTicket.ticketNo) }}</div>
-          <div class="ticket-biz">{{ activeTicket.businessTypeName }}</div>
-        </div>
-        <div class="ticket-info">
-          <div v-if="activeTicket.waitingCount != null && activeTicket.waitingCount > 0" class="info-item">
-            <span class="info-label">前方等待</span>
-            <span class="info-value">{{ activeTicket.waitingCount }} 人</span>
+      <transition name="fade" mode="out-in">
+        <!-- 阶段1：手机号查询 -->
+        <div v-if="!error && pageState === 'query'" key="query" class="query-section">
+          <p class="query-desc">请输入手机号码查询排队情况，或取新号</p>
+          <div class="form-group">
+            <label>手机号码</label>
+            <input
+              v-model="phone"
+              type="tel"
+              class="input"
+              placeholder="请输入手机号码"
+              maxlength="11"
+              @keyup.enter="checkActiveTicket"
+            />
+            <div class="phone-hint" v-if="phone.length > 0 && phone.length < 11">
+              <span class="hint-gray">请输入11位手机号</span>
+            </div>
+            <div class="phone-hint" v-else-if="phone.length === 11 && !phoneValid">
+              <span class="hint-red">手机号格式不正确</span>
+            </div>
           </div>
-          <div v-if="activeTicket.waitingCount != null && activeTicket.waitingCount > 0" class="info-item">
-            <span class="info-label">预计等待</span>
-            <span class="info-value">约 {{ activeTicket.estimatedWaitMinutes || 0 }} 分钟</span>
+          <div class="action-row">
+            <button
+              class="btn-primary"
+              :disabled="!phoneValid || queryLoading"
+              @click="checkActiveTicket"
+            >
+              {{ queryLoading ? '查询中...' : '查询排队' }}
+            </button>
           </div>
-          <div v-if="activeTicket.counterName" class="info-item">
-            <span class="info-label">服务窗口</span>
-            <span class="info-value">{{ activeTicket.counterName }}</span>
-          </div>
-          <div class="info-item">
-            <span class="info-label">取号时间</span>
-            <span class="info-value">{{ formatTime(activeTicket.createdAt) }}</span>
+          <div class="action-row" style="margin-top: var(--sp-3);">
+            <button class="btn-secondary" @click="goToTicketForm">跳过，直接取号</button>
           </div>
         </div>
-        <div class="action-row">
-          <button class="btn-secondary" @click="goToTicketForm">取新号</button>
-          <button class="btn-primary" @click="refreshTracking">刷新进度</button>
-        </div>
-      </div>
 
-      <!-- 阶段2b：无票据 → 取号表单 -->
-      <div v-else-if="pageState === 'ticket'" class="form-section">
-        <div class="form-group">
-          <label>业务类型</label>
-          <select v-model="selectedBusinessId" class="input select" :disabled="loading" @focus="onBusinessSelectFocus">
-            <option value="">请选择业务类型</option>
-            <option v-for="biz in businessTypes" :key="biz.id" :value="biz.id">
-              {{ biz.name }}（{{ biz.prefix }}）— 等待 {{ biz.waitingCount || 0 }} 人
-            </option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label>手机号码</label>
-          <input v-model="phone" type="tel" class="input" placeholder="请输入手机号码" maxlength="11" />
-        </div>
-
-        <div class="form-group">
-          <label>姓名</label>
-          <input v-model="name" type="text" class="input" placeholder="请输入您的姓名" />
-        </div>
-
-        <div class="action-row">
-          <button
-            class="btn-primary"
-            :disabled="!canSubmit || submitting"
-            @click="takeTicket"
-          >
-            {{ submitting ? '取号中...' : '立即取号' }}
-          </button>
-        </div>
-
-        <div class="tips">
-          <p>· 同一业务类型每天仅可取一个号</p>
-          <p>· 取号后请留意叫号大屏</p>
-        </div>
-      </div>
-
-      <!-- 取号成功 -->
-      <div v-else-if="pageState === 'success'" class="success-section">
-        <div class="success-icon">✓</div>
-        <h2>取号成功</h2>
-        <div class="ticket-card">
-          <div class="ticket-no">{{ getDisplayTicketNo(ticketResult.ticketNo) }}</div>
-          <div class="ticket-biz">{{ ticketResult.businessType }}</div>
-        </div>
-        <div class="ticket-info">
-          <div class="info-item">
-            <span class="info-label">前方等待</span>
-            <span class="info-value">{{ ticketResult.waitingCount }} 人</span>
+        <!-- 阶段2a：有未完成票据 → 显示排队进度 -->
+        <div v-else-if="!error && pageState === 'tracking'" key="tracking" class="tracking-section">
+          <div class="step-back">
+            <button class="btn-back" @click="goToQuery">
+              <el-icon><ArrowLeft /></el-icon> 返回上一步
+            </button>
           </div>
-          <div class="info-item">
-            <span class="info-label">预计等待</span>
-            <span class="info-value">约 {{ ticketResult.estimatedWaitMinutes }} 分钟</span>
+          <div class="status-badge" :class="activeTicket.status?.toLowerCase()">
+            {{ activeTicket.statusText || '等待中' }}
+          </div>
+          <div class="ticket-card">
+            <div class="ticket-no">{{ getDisplayTicketNo(activeTicket.ticketNo) }}</div>
+            <div class="ticket-biz">{{ activeTicket.businessTypeName }}</div>
+          </div>
+          <div class="ticket-info">
+            <div v-if="activeTicket.waitingCount != null && activeTicket.waitingCount > 0" class="info-item">
+              <span class="info-label">前方等待</span>
+              <span class="info-value">{{ activeTicket.waitingCount }} 人</span>
+            </div>
+            <div v-if="activeTicket.waitingCount != null && activeTicket.waitingCount > 0" class="info-item">
+              <span class="info-label">预计等待</span>
+              <span class="info-value">约 {{ activeTicket.estimatedWaitMinutes || 0 }} 分钟</span>
+            </div>
+            <div v-if="activeTicket.counterName" class="info-item">
+              <span class="info-label">服务窗口</span>
+              <span class="info-value">{{ activeTicket.counterName }}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">取号时间</span>
+              <span class="info-value">{{ formatTime(activeTicket.createdAt) }}</span>
+            </div>
+          </div>
+          <div class="action-row">
+            <button class="btn-secondary" @click="goToTicketForm">取新号</button>
+            <button class="btn-primary" @click="refreshTracking">刷新进度</button>
           </div>
         </div>
-        <div class="action-row">
-          <button class="btn-secondary" @click="goToTicketForm">继续取号</button>
-          <button class="btn-primary" @click="goToTracking">查询进度</button>
+
+        <!-- 阶段2b：无票据 → 取号表单 -->
+        <div v-else-if="!error && pageState === 'ticket'" key="ticket" class="form-section">
+          <div class="step-back">
+            <button class="btn-back" @click="goToQuery">
+              <el-icon><ArrowLeft /></el-icon> 返回上一步
+            </button>
+          </div>
+          <div class="form-group">
+            <label>业务类型</label>
+            <el-select
+              v-model="selectedBusinessId"
+              placeholder="请选择业务类型"
+              :disabled="loading"
+              @focus="onBusinessSelectFocus"
+              class="el-select-full"
+            >
+              <el-option
+                v-for="biz in businessTypes"
+                :key="biz.id"
+                :label="`${biz.name}（${biz.prefix}）— 等待 ${biz.waitingCount || 0} 人`"
+                :value="biz.id"
+              />
+              <template #empty>
+                <span style="color: var(--text-muted); font-size: 13px;">暂无可用业务类型</span>
+              </template>
+            </el-select>
+          </div>
+
+          <div class="form-group">
+            <label>手机号码</label>
+            <input v-model="phone" type="tel" class="input" placeholder="请输入手机号码" maxlength="11" />
+            <div class="phone-hint" v-if="phone.length > 0 && phone.length < 11">
+              <span class="hint-gray">请输入11位手机号</span>
+            </div>
+            <div class="phone-hint" v-else-if="phone.length === 11 && !phoneValid">
+              <span class="hint-red">手机号格式不正确</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>姓名</label>
+            <input v-model="name" type="text" class="input" placeholder="请输入您的姓名" />
+          </div>
+
+          <div class="action-row">
+            <button
+              class="btn-primary"
+              :disabled="!canSubmit || submitting"
+              @click="takeTicket"
+            >
+              {{ submitting ? '取号中...' : '立即取号' }}
+            </button>
+          </div>
+
+          <div class="tips">
+            <p>· 同一业务类型每天仅可取一个号</p>
+            <p>· 取号后请留意叫号大屏</p>
+          </div>
         </div>
-      </div>
+
+        <!-- 取号成功 -->
+        <div v-else-if="!error && pageState === 'success'" key="success" class="success-section">
+          <div class="step-back">
+            <button class="btn-back" @click="goToTicketForm">
+              <el-icon><ArrowLeft /></el-icon> 返回上一步
+            </button>
+          </div>
+          <div class="success-icon">✓</div>
+          <h2>取号成功</h2>
+          <div class="ticket-card">
+            <div class="ticket-no">{{ getDisplayTicketNo(ticketResult.ticketNo) }}</div>
+            <div class="ticket-biz">{{ ticketResult.businessType }}</div>
+          </div>
+          <div class="ticket-info">
+            <div class="info-item">
+              <span class="info-label">前方等待</span>
+              <span class="info-value">{{ ticketResult.waitingCount }} 人</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">预计等待</span>
+              <span class="info-value">约 {{ ticketResult.estimatedWaitMinutes }} 分钟</span>
+            </div>
+          </div>
+          <div class="action-row">
+            <button class="btn-secondary" @click="goToTicketForm">继续取号</button>
+            <button class="btn-primary" @click="goToTracking">查询进度</button>
+          </div>
+        </div>
+      </transition>
     </div>
   </div>
 </template>
@@ -144,6 +191,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { ArrowLeft } from '@element-plus/icons-vue'
 import axios from 'axios'
 import { getDisplayTicketNo } from '../utils/ticketUtils'
 import { getTicketStatusText, isActiveTicketStatus, normalizeTicketStatus } from '../utils/status'
@@ -166,6 +214,20 @@ const ticketResult = ref({})
 const pageState = ref('query')
 const queryLoading = ref(false)
 const activeTicket = ref({})
+
+// 步骤条索引: 0=查询 1=取号 2=完成
+const stepIndex = computed(() => {
+  if (pageState.value === 'query') return 0
+  if (pageState.value === 'ticket' || pageState.value === 'tracking') return 1
+  if (pageState.value === 'success') return 2
+  return 0
+})
+
+/** 返回查询阶段 */
+function goToQuery() {
+  if (refreshTimer) clearInterval(refreshTimer)
+  pageState.value = 'query'
+}
 
 // 轮询定时器
 let refreshTimer = null
@@ -423,6 +485,61 @@ function onBusinessSelectFocus() {
   text-align: center;
 }
 
+/* 步骤条 */
+.steps-nav {
+  margin-bottom: var(--sp-6);
+}
+
+/* 过渡动画 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* 返回上一步按钮 */
+.step-back {
+  width: 100%;
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: var(--sp-3);
+}
+.btn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+  transition: color 0.15s, background 0.15s;
+}
+.btn-back:hover {
+  color: var(--primary);
+  background: var(--primary-light);
+}
+
+/* 手机号渐进式校验提示 */
+.phone-hint {
+  text-align: left;
+  margin-top: var(--sp-1);
+  font-size: var(--text-xs);
+  min-height: 18px;
+}
+.hint-gray { color: var(--text-muted); }
+.hint-red { color: var(--danger); }
+
+/* el-select 全宽 */
+.el-select-full {
+  width: 100%;
+}
+
 .error-icon,
 .success-icon {
   width: 64px;
@@ -452,13 +569,6 @@ function onBusinessSelectFocus() {
 .query-desc {
   color: var(--text-secondary);
   margin-bottom: var(--sp-6);
-}
-
-.tracking-section,
-.success-section {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
 }
 
 .status-badge {
@@ -530,6 +640,14 @@ function onBusinessSelectFocus() {
   cursor: pointer;
 }
 
+/* tracking 和 success 不再需要居中 flex，由 step-back 占满 */
+.tracking-section,
+.success-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
 .action-row {
   display: flex;
   gap: var(--sp-3);
@@ -583,7 +701,7 @@ function onBusinessSelectFocus() {
 .tips {
   margin-top: var(--sp-6);
   padding: var(--sp-4);
-  background: #f7f8fa;
+  background: var(--bg-panel);
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
 }
@@ -604,9 +722,9 @@ function onBusinessSelectFocus() {
 .ticket-card {
   width: 100%;
   box-sizing: border-box;
-  background: linear-gradient(180deg, #ffffff 0%, #f7faff 100%);
+  background: #ffffff;
   border: 1px solid rgba(0, 82, 217, 0.16);
-  border-top: 4px solid var(--primary);
+  border-left: 4px solid var(--primary);
   border-radius: var(--radius-lg);
   padding: var(--sp-8);
   margin-bottom: var(--sp-6);
@@ -636,7 +754,7 @@ function onBusinessSelectFocus() {
 
 .info-item {
   flex: 1;
-  background: #f7f8fa;
+  background: var(--bg-panel);
   border-radius: var(--radius-md);
   padding: var(--sp-4);
   border: 1px solid var(--border);

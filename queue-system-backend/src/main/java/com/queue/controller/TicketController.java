@@ -48,8 +48,12 @@ public class TicketController {
         return Result.ok();
     }
 
-    @GetMapping("/ticket/my")
-    public Result<List<MyTicketVO>> getMyTickets(@RequestParam String phone) {
+    @PostMapping("/ticket/my")
+    public Result<List<MyTicketVO>> getMyTickets(@RequestBody java.util.Map<String, String> body) {
+        String phone = body.get("phone");
+        if (phone == null || phone.isBlank()) {
+            return Result.error(400, "手机号不能为空");
+        }
         return Result.ok(ticketService.getMyTickets(phone));
     }
 

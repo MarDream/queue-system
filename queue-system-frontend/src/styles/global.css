@@ -83,10 +83,10 @@
   --duration-normal: 250ms;
   --duration-slow: 400ms;
 
-  --radius-sm: 2px;
-  --radius-md: 4px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
   --radius-full: 9999px;
 
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
@@ -457,6 +457,17 @@ body {
 @media (max-width: 480px) {
   .page-header { padding: var(--sp-2) var(--sp-3); }
   .page-header .logo { font-size: var(--text-sm); }
+}
+
+/* ─── Display Board Tokens ─────────────────────────────────────── */
+:root {
+  --screen-bg-dark: #0d1b3a;
+  --screen-panel-bg: rgba(255,255,255,0.08);
+  --screen-accent: #0052d4;
+  --screen-footer-bg: #1e293b;
+  --screen-text-muted: #94a3b8;
+  --screen-text-dark: #1e293b;
+  --screen-calling-row-bg: rgba(30, 64, 175, 0.72);
 }
 
 /* region-select 不显示蓝色聚焦边框 */

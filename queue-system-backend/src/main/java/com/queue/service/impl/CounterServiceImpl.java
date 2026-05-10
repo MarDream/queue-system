@@ -85,14 +85,34 @@ public class CounterServiceImpl implements CounterService {
             Ticket bestTicket = null;
             LocalDateTime calledAt = null;
             for (int attempt = 0; attempt < 5; attempt++) {
-                QueryWrapper<Ticket> wrapper = new QueryWrapper<>();
-                wrapper.in("business_type_id", businessTypeIds)
+                // 优先查询被激活的票（可利用 idx_ticket_status_type 索引），若无则查普通等待票
+                Ticket candidate = null;
+
+                // 第一次查询：被激活的票（reactivated_at IS NOT NULL），按激活时间升序
+                QueryWrapper<Ticket> reactivatedWrapper = new QueryWrapper<>();
+                reactivatedWrapper.in("business_type_id", businessTypeIds)
                        .in("region_id", regionIds)
                        .eq("status", TicketStatus.WAITING.getValue())
+                       .isNotNull("reactivated_at")
                        .ge("created_at", startOfDay)
                        .lt("created_at", endOfDay)
-                       .last("ORDER BY IF(reactivated_at IS NULL, 1, 0) ASC, reactivated_at ASC, created_at ASC LIMIT 1");
-                Ticket candidate = ticketMapper.selectOne(wrapper);
+                       .orderByAsc("reactivated_at")
+                       .last("LIMIT 1");
+                candidate = ticketMapper.selectOne(reactivatedWrapper);
+
+                // 第二次查询：普通等待票（无被激活票时），按创建时间升序
+                if (candidate == null) {
+                    QueryWrapper<Ticket> normalWrapper = new QueryWrapper<>();
+                    normalWrapper.in("business_type_id", businessTypeIds)
+                           .in("region_id", regionIds)
+                           .eq("status", TicketStatus.WAITING.getValue())
+                           .isNull("reactivated_at")
+                           .ge("created_at", startOfDay)
+                           .lt("created_at", endOfDay)
+                           .orderByAsc("created_at")
+                           .last("LIMIT 1");
+                    candidate = ticketMapper.selectOne(normalWrapper);
+                }
                 if (candidate == null) {
                     break;
                 }
@@ -147,27 +167,35 @@ public class CounterServiceImpl implements CounterService {
 
     @Override
     public CounterCallResponse recall(Long counterId) {
-        Counter counter = counterMapper.selectById(counterId);
-        if (counter == null || counter.getCurrentTicketId() == null) {
+        String lockKey = "call:" + counterId;
+        if (!queueService.acquireLock(lockKey, 5)) {
             throw new BusinessException(ResultCode.COUNTER_NOT_OPERABLE);
         }
-        Ticket ticket = ticketMapper.selectById(counter.getCurrentTicketId());
-        if (ticket == null) throw new BusinessException(ResultCode.TICKET_NOT_FOUND);
+        try {
+            Counter counter = counterMapper.selectById(counterId);
+            if (counter == null || counter.getCurrentTicketId() == null) {
+                throw new BusinessException(ResultCode.COUNTER_NOT_OPERABLE);
+            }
+            Ticket ticket = ticketMapper.selectById(counter.getCurrentTicketId());
+            if (ticket == null) throw new BusinessException(ResultCode.TICKET_NOT_FOUND);
 
-        ticket.setStatus(TicketStatus.CALLED.getValue());
-        ticket.setCalledAt(LocalDateTime.now());
-        ticketMapper.updateById(ticket);
+            ticket.setStatus(TicketStatus.CALLED.getValue());
+            ticket.setCalledAt(LocalDateTime.now());
+            ticketMapper.updateById(ticket);
 
-        BusinessType bt = businessTypeMapper.selectById(ticket.getBusinessTypeId());
-        CounterCallResponse resp = new CounterCallResponse();
-        resp.setTicketNo(ticket.getTicketNo());
-        resp.setBusinessType(bt != null ? bt.getName() : "");
-        resp.setCustomerName(ticket.getName());
-        // 拼接区域完整路径 + 窗口编号，如：深圳市-南山区1号窗口
-        String regionPath = regionMapper.selectFullRegionPath(counter.getRegionId());
-        resp.setCounterName(regionPath != null ? regionPath + counter.getNumber() + "号窗口" : counter.getName());
-        resp.setCalledAt(ticket.getCalledAt());
-        return resp;
+            BusinessType bt = businessTypeMapper.selectById(ticket.getBusinessTypeId());
+            CounterCallResponse resp = new CounterCallResponse();
+            resp.setTicketNo(ticket.getTicketNo());
+            resp.setBusinessType(bt != null ? bt.getName() : "");
+            resp.setCustomerName(ticket.getName());
+            // 拼接区域完整路径 + 窗口编号，如：深圳市-南山区1号窗口
+            String regionPath = regionMapper.selectFullRegionPath(counter.getRegionId());
+            resp.setCounterName(regionPath != null ? regionPath + counter.getNumber() + "号窗口" : counter.getName());
+            resp.setCalledAt(ticket.getCalledAt());
+            return resp;
+        } finally {
+            queueService.releaseLock(lockKey);
+        }
     }
 
     @Override
@@ -315,35 +343,43 @@ public class CounterServiceImpl implements CounterService {
         if (ticketNo == null || ticketNo.isBlank()) {
             throw new BusinessException(ResultCode.TICKET_NOT_FOUND);
         }
-        Ticket ticket = ticketMapper.selectOne(
-            new QueryWrapper<Ticket>()
-                .eq("ticket_no", ticketNo)
-                .last("LIMIT 1")
-        );
-        if (ticket == null) {
-            throw new BusinessException(ResultCode.TICKET_NOT_FOUND);
+        String lockKey = "reactivate:" + ticketNo;
+        if (!queueService.acquireLock(lockKey, 10)) {
+            throw new BusinessException(ResultCode.COUNTER_NOT_OPERABLE);
         }
-        if (!TicketStatus.SKIPPED.getValue().equals(ticket.getStatus())) {
-            throw new BusinessException(50001, "只有已过号状态的票才能重新激活");
-        }
-        // 检查是否为当日票
-        LocalDateTime today = LocalDateTime.now();
-        LocalDateTime startOfDay = today.toLocalDate().atStartOfDay();
-        LocalDateTime endOfDay = today.toLocalDate().plusDays(1).atStartOfDay();
-        if (ticket.getCreatedAt() == null ||
-            ticket.getCreatedAt().isBefore(startOfDay) || ticket.getCreatedAt().isAfter(endOfDay)) {
-            throw new BusinessException(50001, "只能重新激活当日过号的票");
-        }
+        try {
+            Ticket ticket = ticketMapper.selectOne(
+                new QueryWrapper<Ticket>()
+                    .eq("ticket_no", ticketNo)
+                    .last("LIMIT 1")
+            );
+            if (ticket == null) {
+                throw new BusinessException(ResultCode.TICKET_NOT_FOUND);
+            }
+            if (!TicketStatus.SKIPPED.getValue().equals(ticket.getStatus())) {
+                throw new BusinessException(50001, "只有已过号状态的票才能重新激活");
+            }
+            // 检查是否为当日票
+            LocalDateTime today = LocalDateTime.now();
+            LocalDateTime startOfDay = today.toLocalDate().atStartOfDay();
+            LocalDateTime endOfDay = today.toLocalDate().plusDays(1).atStartOfDay();
+            if (ticket.getCreatedAt() == null ||
+                ticket.getCreatedAt().isBefore(startOfDay) || ticket.getCreatedAt().isAfter(endOfDay)) {
+                throw new BusinessException(50001, "只能重新激活当日过号的票");
+            }
 
-        // 重新激活：状态改为等待，清空过号类型，counterId 置空，记录激活时间
-        ticket.setStatus(TicketStatus.WAITING.getValue());
-        ticket.setSkipType(null);
-        ticket.setCounterId(null);
-        ticket.setReactivatedAt(LocalDateTime.now());
-        ticketMapper.updateById(ticket);
+            // 重新激活：状态改为等待，清空过号类型，counterId 置空，记录激活时间
+            ticket.setStatus(TicketStatus.WAITING.getValue());
+            ticket.setSkipType(null);
+            ticket.setCounterId(null);
+            ticket.setReactivatedAt(LocalDateTime.now());
+            ticketMapper.updateById(ticket);
 
-        // 重新加入等待队列（队首）
-        queueService.enqueueAtFront(ticket.getRegionId(), ticket.getBusinessTypeId(), ticket.getId());
-        queueService.incrementWaitingCount(ticket.getRegionId(), ticket.getBusinessTypeId());
+            // 重新加入等待队列（队首）
+            queueService.enqueueAtFront(ticket.getRegionId(), ticket.getBusinessTypeId(), ticket.getId());
+            queueService.incrementWaitingCount(ticket.getRegionId(), ticket.getBusinessTypeId());
+        } finally {
+            queueService.releaseLock(lockKey);
+        }
     }
 }

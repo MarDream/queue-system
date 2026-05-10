@@ -3,6 +3,7 @@ package com.queue.util;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -15,8 +16,18 @@ import java.util.Map;
 @Component
 public class JwtUtil {
 
-    @Value("${jwt.secret:queue-system-secret-key-2024-queue-management-system-secure-key}")
+    @Value("${jwt.secret:}")
     private String secret;
+
+    @PostConstruct
+    public void validateSecret() {
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException("jwt.secret 配置不能为空，请在配置文件或环境变量中设置");
+        }
+        if (secret.length() < 32) {
+            throw new IllegalStateException("jwt.secret 长度不能少于32个字符，当前长度: " + secret.length());
+        }
+    }
 
     @Value("${jwt.expiration:86400000}")
     private Long expiration;

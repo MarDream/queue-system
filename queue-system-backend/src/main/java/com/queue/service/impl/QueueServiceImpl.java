@@ -4,9 +4,16 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.queue.entity.Ticket;
 import com.queue.enums.TicketStatus;
 import com.queue.mapper.TicketMapper;
+import com.queue.mapper.BusinessTypeMapper;
+import com.queue.mapper.RegionMapper;
+import com.queue.entity.BusinessType;
+import com.queue.entity.Region;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.queue.service.QueueService;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -17,14 +24,22 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 @Service
 public class QueueServiceImpl implements QueueService {
 
+    private static final Logger log = LoggerFactory.getLogger(QueueServiceImpl.class);
+
     private final StringRedisTemplate stringRedisTemplate;
     private final TicketMapper ticketMapper;
+    private final BusinessTypeMapper businessTypeMapper;
+    private final RegionMapper regionMapper;
     private final ThreadLocal<Map<String, String>> lockValueHolder = ThreadLocal.withInitial(HashMap::new);
     private static final Duration WAITING_COUNT_TTL = Duration.ofMinutes(10);
+    // Redis 降级时的本地互斥锁，按 lockKey 粒度加锁
+    private final ConcurrentHashMap<String, ReentrantLock> fallbackLocks = new ConcurrentHashMap<>();
 
     private static final DefaultRedisScript<Long> UNLOCK_SCRIPT = new DefaultRedisScript<>(
         "if redis.call('get', KEYS[1]) == ARGV[1] then " +
@@ -52,9 +67,12 @@ public class QueueServiceImpl implements QueueService {
         return "counter:completed:" + counterId + ":" + date;
     }
 
-    public QueueServiceImpl(StringRedisTemplate stringRedisTemplate, TicketMapper ticketMapper) {
+    public QueueServiceImpl(StringRedisTemplate stringRedisTemplate, TicketMapper ticketMapper,
+                            BusinessTypeMapper businessTypeMapper, RegionMapper regionMapper) {
         this.stringRedisTemplate = stringRedisTemplate;
         this.ticketMapper = ticketMapper;
+        this.businessTypeMapper = businessTypeMapper;
+        this.regionMapper = regionMapper;
     }
 
     @Override
@@ -99,20 +117,35 @@ public class QueueServiceImpl implements QueueService {
 
     @Override
     public void enqueue(Long regionId, Long businessTypeId, Long ticketId) {
-        String key = waitingListKey(regionId, businessTypeId);
-        stringRedisTemplate.opsForList().rightPush(key, ticketId.toString());
+        try {
+            String key = waitingListKey(regionId, businessTypeId);
+            stringRedisTemplate.opsForList().rightPush(key, ticketId.toString());
+        } catch (Exception e) {
+            // Redis 不可用时降级：票号已在 DB 中 status='waiting'，callNext() 会从 DB 查询
+            log.warn("Redis enqueue failed, fallback to DB. regionId={}, typeId={}, ticketId={}", regionId, businessTypeId, ticketId, e);
+        }
     }
 
     @Override
     public void enqueueAtFront(Long regionId, Long businessTypeId, Long ticketId) {
-        String key = waitingListKey(regionId, businessTypeId);
-        stringRedisTemplate.opsForList().leftPush(key, ticketId.toString());
+        try {
+            String key = waitingListKey(regionId, businessTypeId);
+            stringRedisTemplate.opsForList().leftPush(key, ticketId.toString());
+        } catch (Exception e) {
+            // Redis 不可用时降级：票号已在 DB 中 status='waiting'，callNext() 会从 DB 查询
+            log.warn("Redis enqueueAtFront failed, fallback to DB. regionId={}, typeId={}, ticketId={}", regionId, businessTypeId, ticketId, e);
+        }
     }
 
     @Override
     public void dequeue(Long regionId, Long businessTypeId, Long ticketId) {
-        String key = waitingListKey(regionId, businessTypeId);
-        stringRedisTemplate.opsForList().remove(key, 1, ticketId.toString());
+        try {
+            String key = waitingListKey(regionId, businessTypeId);
+            stringRedisTemplate.opsForList().remove(key, 1, ticketId.toString());
+        } catch (Exception e) {
+            // Redis 不可用时降级：callNext() 已通过 DB 更新票号状态，Redis 队列不一致会在下次操作时自愈
+            log.warn("Redis dequeue failed, fallback to DB. regionId={}, typeId={}, ticketId={}", regionId, businessTypeId, ticketId, e);
+        }
     }
 
     @Override
@@ -215,8 +248,15 @@ public class QueueServiceImpl implements QueueService {
             }
             return false;
         } catch (Exception e) {
-            // 如果 Redis 操作失败，抛出异常而不是静默返回 false
-            throw new RuntimeException("Failed to acquire lock: " + lockKey, e);
+            // Redis 不可用时降级：使用本地 ReentrantLock 保护并发
+            log.warn("Redis acquireLock failed, fallback to local lock. lockKey={}", lockKey, e);
+            ReentrantLock fallback = fallbackLocks.computeIfAbsent(lockKey, k -> new ReentrantLock());
+            boolean acquired = fallback.tryLock();
+            if (acquired) {
+                // 标记为本地锁，releaseLock 时走本地解锁逻辑
+                lockValueHolder.get().put(lockKey, "LOCAL:" + lockValue);
+            }
+            return acquired;
         }
     }
 
@@ -228,7 +268,15 @@ public class QueueServiceImpl implements QueueService {
             return;
         }
         try {
-            stringRedisTemplate.execute(UNLOCK_SCRIPT, List.of(lockKey), lockValue);
+            if (lockValue.startsWith("LOCAL:")) {
+                // 本地降级锁：释放 ReentrantLock
+                ReentrantLock fallback = fallbackLocks.get(lockKey);
+                if (fallback != null && fallback.isHeldByCurrentThread()) {
+                    fallback.unlock();
+                }
+            } else {
+                stringRedisTemplate.execute(UNLOCK_SCRIPT, List.of(lockKey), lockValue);
+            }
         } finally {
             if (map.isEmpty()) {
                 lockValueHolder.remove();
@@ -249,5 +297,37 @@ public class QueueServiceImpl implements QueueService {
         String key = completedHistoryKey(counterId);
         List<String> list = stringRedisTemplate.opsForList().range(key, 0, -1);
         return list != null ? list : List.of();
+    }
+
+    @Override
+    public void reconcileWaitingCounts() {
+        List<BusinessType> types = businessTypeMapper.selectList(
+                new QueryWrapper<BusinessType>().eq("is_enabled", 1));
+        List<Region> regions = regionMapper.selectList(null);
+
+        int corrected = 0;
+        for (Region region : regions) {
+            for (BusinessType type : types) {
+                try {
+                    long dbCount = loadWaitingCountFromDb(region.getId(), type.getId());
+                    String key = waitingCountKey(region.getId(), type.getId());
+                    String cached = stringRedisTemplate.opsForValue().get(key);
+                    if (cached != null) {
+                        long cachedVal = Long.parseLong(cached);
+                        if (cachedVal != dbCount) {
+                            stringRedisTemplate.opsForValue().set(key, String.valueOf(dbCount), WAITING_COUNT_TTL);
+                            corrected++;
+                            log.info("Reconciled waiting count: region={}, type={}, cached={}, actual={}",
+                                    region.getId(), type.getId(), cachedVal, dbCount);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("Reconcile failed for region={}, type={}", region.getId(), type.getId(), e);
+                }
+            }
+        }
+        if (corrected > 0) {
+            log.info("Waiting count reconciliation completed: {} entries corrected", corrected);
+        }
     }
 }

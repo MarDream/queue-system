@@ -26,8 +26,8 @@ docs/
 
 ## 核心架构决策
 
-**Redis 队列模型**: 序号 `queue:seq:{typeId}:{date}` | FIFO `queue:waiting:{typeId}` | 计数 `queue:count:{typeId}` | 分布式锁 `queue:lock:call:{counterId}`
-**票号格式**: `{prefix}{seq}` 如 A008，前缀取 business_type.prefix，序号每日重置
+**Redis 队列模型**: 序号 `queue:seq:{regionId}:{typeId}:{date}` | FIFO `queue:waiting:{regionId}:{typeId}` | 计数 `queue:count:{regionId}:{typeId}` | 分布式锁 `queue:lock:call:{counterId}`
+**票号格式**: `{regionCode}{prefix}{seq}` 如 440300A001，regionCode 取 region.region_code，前缀取 business_type.prefix，序号每日重置，3位起超999自动扩展
 **状态机**: WAITING→CALLED→SERVING→COMPLETED，可分叉至 CANCELLED / SKIPPED
 **多业务柜台叫号**: counter_business 多对多，callNext() 跨类型 FIFO 取最早票 + 分布式锁防竞态
 **Redis 故障降级**: 退回 DB 查询（行锁序号 + status='waiting' 排序 + COUNT）
@@ -52,7 +52,7 @@ docs/
 
 ## 第一阶段排除
 
-预约模块 | WebSocket(用轮询) | JWT(用counterId) | 短信/微信通知 | 审计日志 | 跳过票自动重入队 | sys_config 运行时读取
+预约模块 | WebSocket(用轮询) | 短信/微信通知 | 审计日志 | sys_config 运行时读取
 
 ## 开发命令
 
@@ -69,7 +69,7 @@ mvn clean package -DskipTests    # 打包
 mysql -u root -p queue_system < src/main/resources/db/schema.sql
 ```
 
-前置: Java 17+ / Maven 3.9+ / Node 18+ / MySQL 8.0(3306) / Redis(6379)
+前置: Java 17+ / Maven 3.9+ / Node 18+ / MySQL 8.0(Docker,3306) / Redis(Docker,6379)
 
 ## Git
 

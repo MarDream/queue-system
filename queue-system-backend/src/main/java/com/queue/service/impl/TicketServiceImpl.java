@@ -173,9 +173,9 @@ public class TicketServiceImpl implements TicketService {
             }
 
             // 3. Generate sequence and ticket number
-            // 新格式：{区域代码(6位)}{业务前缀(1位)}{当日序号(3位)}，如 440300A001
+            // 新格式：{区域代码(6位)}{业务前缀(1-5位)}{当日序号(3位起，超999自动扩展)}，如 440300A001
             long seq = queueService.generateSequence(regionId, request.getBusinessTypeId());
-            ticketNo = regionCode + bt.getPrefix() + String.format("%03d", seq);
+            ticketNo = regionCode + bt.getPrefix() + formatSequence(seq);
 
             // 4. Insert ticket with masked phone
             ticket = new Ticket();
@@ -546,5 +546,14 @@ public class TicketServiceImpl implements TicketService {
             return;
         }
         wrapper.and(w -> w.like("phone_masked", phone).or().like("phone", phone));
+    }
+
+    /**
+     * 动态位数格式化序号：3位起，超999自动扩展为4位，避免票号冲突。
+     * 例如：1→001, 999→999, 1000→1000, 10000→10000
+     */
+    private String formatSequence(long seq) {
+        int digits = seq > 999 ? (int) Math.ceil(Math.log10(seq + 1)) : 3;
+        return String.format("%0" + digits + "d", seq);
     }
 }

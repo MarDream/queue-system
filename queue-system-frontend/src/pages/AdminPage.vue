@@ -10,6 +10,16 @@
 
       <!-- Navigation menu -->
       <nav v-if="!sidebarCollapsed" ref="menuNavRef" class="menu" @contextmenu.prevent="handleSidebarContext">
+        <div v-if="flatMenus.length >= 6" class="menu-search">
+          <el-input
+            v-model="menuSearchQuery"
+            placeholder="搜索菜单..."
+            size="small"
+            clearable
+            :prefix-icon="Search"
+            class="menu-search-input"
+          />
+        </div>
         <div ref="rootMenuListRef" class="menu-root-list">
           <template v-for="item in rootItems" :key="item.id">
             <!-- 分组容器 -->
@@ -221,7 +231,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, defineAsyncComponent } from 'vue'
-import { SwitchButton, Location, UserFilled, Avatar } from '@element-plus/icons-vue'
+import { SwitchButton, Location, UserFilled, Avatar, Search } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import { menuApi } from '../api/admin'
@@ -254,6 +264,7 @@ const rootMenuListRef = ref(null)
 // 菜单数据（从后端加载）
 const menuList = ref([])
 const expandedIds = ref(new Set())
+const menuSearchQuery = ref('')
 
 // 右键菜单
 const ctxVisible = ref(false)
@@ -292,7 +303,32 @@ const treeMenus = computed(() => {
 
 // 根级别显示项（所有根级菜单：分组 + 普通菜单）
 const rootItems = computed(() => {
-  return treeMenus.value
+  const items = treeMenus.value
+  const q = menuSearchQuery.value.trim().toLowerCase()
+  if (!q) return items
+
+  // 模糊搜索：过滤匹配的菜单项（保留分组结构）
+  return items
+    .map(item => {
+      if (item.type === 'group') {
+        const matchChildren = (item.children || []).filter(c =>
+          c.name.toLowerCase().includes(q) || (c.path || '').toLowerCase().includes(q)
+        )
+        if (item.name.toLowerCase().includes(q) || matchChildren.length > 0) {
+          return { ...item, children: matchChildren.length > 0 ? matchChildren : item.children }
+        }
+        return null
+      }
+      // 普通菜单项
+      const nameMatch = item.name.toLowerCase().includes(q)
+      const pathMatch = (item.path || '').toLowerCase().includes(q)
+      const childMatch = (item.children || []).some(c =>
+        c.name.toLowerCase().includes(q) || (c.path || '').toLowerCase().includes(q)
+      )
+      if (nameMatch || pathMatch || childMatch) return item
+      return null
+    })
+    .filter(Boolean)
 })
 
 // 所有分组列表（用于右键"移入分组"子菜单）
@@ -1008,6 +1044,38 @@ onUnmounted(() => {
   overflow-x: hidden;
 }
 
+.menu-search {
+  padding: 0 var(--sp-3) var(--sp-2);
+}
+
+.menu-search-input :deep(.el-input__wrapper) {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: var(--radius-sm) !important;
+  box-shadow: none !important;
+}
+
+.menu-search-input :deep(.el-input__wrapper:hover) {
+  border-color: rgba(255, 255, 255, 0.18) !important;
+}
+
+.menu-search-input :deep(.el-input__wrapper.is-focused) {
+  border-color: var(--primary) !important;
+}
+
+.menu-search-input :deep(.el-input__inner) {
+  color: rgba(255, 255, 255, 0.85) !important;
+  font-size: var(--text-xs) !important;
+}
+
+.menu-search-input :deep(.el-input__inner::placeholder) {
+  color: rgba(255, 255, 255, 0.35) !important;
+}
+
+.menu-search-input :deep(.el-input__prefix .el-icon) {
+  color: rgba(255, 255, 255, 0.4) !important;
+}
+
 .menu-root-list {
   display: flex;
   flex-direction: column;
@@ -1386,11 +1454,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: var(--sp-6);
-  padding: var(--sp-5) var(--sp-6);
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
+  padding: 0;
 }
 
 .content-header-left {

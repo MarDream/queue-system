@@ -23,7 +23,7 @@ public class PhoneCryptoService {
     @Value("${app.phone-encryption.master-key:}")
     private String configuredMasterKey;
 
-    @Value("${jwt.secret:queue-system-secret-key-2024-queue-management-system-secure-key}")
+    @Value("${jwt.secret:}")
     private String fallbackMasterKey;
 
     @Value("${app.phone-encryption.key-version:1}")
@@ -37,6 +37,12 @@ public class PhoneCryptoService {
         String effectiveKey = configuredMasterKey != null && !configuredMasterKey.isBlank()
                 ? configuredMasterKey.trim()
                 : fallbackMasterKey;
+        if (effectiveKey == null || effectiveKey.isBlank()) {
+            throw new IllegalStateException("手机号加密密钥未配置，请设置 app.phone-encryption.master-key 或 jwt.secret");
+        }
+        if (effectiveKey.length() < 32) {
+            throw new IllegalStateException("手机号加密密钥长度不能少于32个字符，当前长度: " + effectiveKey.length());
+        }
         this.secretKeySpec = new SecretKeySpec(sha256(effectiveKey.getBytes(StandardCharsets.UTF_8)), "AES");
     }
 
