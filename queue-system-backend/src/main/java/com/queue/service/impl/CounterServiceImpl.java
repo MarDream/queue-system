@@ -1,6 +1,7 @@
 package com.queue.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.queue.common.BusinessException;
 import com.queue.common.ResultCode;
 import com.queue.enums.CounterStatus;
@@ -18,8 +19,6 @@ import com.queue.mapper.TicketMapper;
 import com.queue.service.CounterService;
 import com.queue.service.QueueService;
 import com.queue.service.RegionService;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,7 +36,7 @@ public class CounterServiceImpl implements CounterService {
     private final BusinessTypeMapper businessTypeMapper;
     private final RegionMapper regionMapper;
     private final RegionService regionService;
-    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+    private final ObjectMapper objectMapper;
 
     public CounterServiceImpl(CounterMapper counterMapper,
                               CounterBusinessMapper counterBusinessMapper,
@@ -45,7 +44,8 @@ public class CounterServiceImpl implements CounterService {
                               QueueService queueService,
                               BusinessTypeMapper businessTypeMapper,
                               RegionMapper regionMapper,
-                              RegionService regionService) {
+                              RegionService regionService,
+                              ObjectMapper objectMapper) {
         this.counterMapper = counterMapper;
         this.counterBusinessMapper = counterBusinessMapper;
         this.ticketMapper = ticketMapper;
@@ -53,6 +53,7 @@ public class CounterServiceImpl implements CounterService {
         this.businessTypeMapper = businessTypeMapper;
         this.regionMapper = regionMapper;
         this.regionService = regionService;
+        this.objectMapper = objectMapper;
     }
 
     @Override

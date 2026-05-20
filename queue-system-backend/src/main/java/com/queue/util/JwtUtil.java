@@ -45,6 +45,7 @@ public class JwtUtil {
     }
 
     private String createToken(Map<String, Object> claims, String subject) {
+        // JJWT 0.12.x 仍使用 java.util.Date，未来版本可能支持 Instant
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + expiration);
 
@@ -83,6 +84,7 @@ public class JwtUtil {
     public boolean isTokenExpired(String token) {
         try {
             Claims claims = parseToken(token);
+            // claims.getExpiration() 返回 Date，使用 Date.before() 比较
             return claims.getExpiration().before(new Date());
         } catch (Exception e) {
             return true;

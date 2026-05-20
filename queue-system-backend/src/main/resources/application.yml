@@ -35,6 +35,10 @@ app:
     master-key:        # 建议部署时通过环境变量覆盖，未配置时回退到 jwt.secret
     key-version: 1
 
+jwt:
+  secret: ${JWT_SECRET:default-dev-secret-key-change-in-production-32chars}
+  expiration: 86400000  # 24小时
+
 logging:
   file:
     path: ./logs

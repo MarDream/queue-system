@@ -69,7 +69,7 @@ mvn clean package -DskipTests    # 打包
 mysql -u root -p queue_system < src/main/resources/db/schema.sql
 ```
 
-前置: Java 17+ / Maven 3.9+ / Node 18+ / MySQL 8.0(Docker,3306) / Redis(Docker,6379)
+前置: Java 25 / Maven 3.9+ / Node 18+ / MySQL 8.0(Docker,3306) / Redis(Docker,6379)
 
 ## Git
 

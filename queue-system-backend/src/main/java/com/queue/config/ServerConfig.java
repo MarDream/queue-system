@@ -2,6 +2,7 @@ package com.queue.config;
 
 import jakarta.annotation.PostConstruct;
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -9,6 +10,7 @@ import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.util.Enumeration;
 
+@Slf4j
 @Component
 @Getter
 public class ServerConfig {
@@ -38,11 +40,11 @@ public class ServerConfig {
         } else {
             localIp = getLocalIpAddress();
         }
-        System.out.println("========================================");
-        System.out.println("  Server IP  : " + localIp + (configuredIp != null && !configuredIp.isBlank() ? " (configured)" : " (auto-detect)"));
-        System.out.println("  Backend    : http://" + localIp + ":" + serverPort);
-        System.out.println("  Frontend   : " + (frontendBaseUrl != null && !frontendBaseUrl.isBlank() ? frontendBaseUrl : "http://" + localIp + ":" + frontendPort));
-        System.out.println("========================================");
+        log.info("========================================");
+        log.info("  Server IP  : {} {}", localIp, (configuredIp != null && !configuredIp.isBlank() ? "(configured)" : "(auto-detect)"));
+        log.info("  Backend    : http://{}:{}", localIp, serverPort);
+        log.info("  Frontend   : {}", (frontendBaseUrl != null && !frontendBaseUrl.isBlank() ? frontendBaseUrl : "http://" + localIp + ":" + frontendPort));
+        log.info("========================================");
     }
 
     public String getBackendBaseUrl() {
@@ -84,6 +86,7 @@ public class ServerConfig {
             // 回退：取非回环地址
             return InetAddress.getLocalHost().getHostAddress();
         } catch (Exception e) {
+            log.warn("获取本地IP地址失败，使用默认值: {}", e.getMessage());
             return "127.0.0.1";
         }
     }

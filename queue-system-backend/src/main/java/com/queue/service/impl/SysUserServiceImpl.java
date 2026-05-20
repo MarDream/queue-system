@@ -30,6 +30,7 @@ import com.queue.service.SysUserService;
 import com.queue.util.JwtUtil;
 import com.queue.util.PasswordUtil;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
@@ -61,6 +62,7 @@ import java.util.concurrent.TimeUnit;
 import java.security.SecureRandom;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class SysUserServiceImpl implements SysUserService {
@@ -517,7 +519,7 @@ public class SysUserServiceImpl implements SysUserService {
             mailSender.send(msg);
         } catch (Exception e) {
             stringRedisTemplate.delete(key);
-            e.printStackTrace();
+            log.error("邮件发送失败: {}", e.getMessage(), e);
             throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "邮件发送失败: " + e.getMessage());
         }
     }

@@ -19,7 +19,6 @@ public class RedisConfig {
     @Bean
     public StringRedisTemplate stringRedisTemplate(RedisConnectionFactory factory) {
         StringRedisTemplate template = new StringRedisTemplate(factory);
-        // 显式设置一下序列化器，确保 key 是字符串
         template.setKeySerializer(new StringRedisSerializer());
         template.setHashKeySerializer(new StringRedisSerializer());
         return template;
@@ -30,19 +29,16 @@ public class RedisConfig {
         RedisTemplate<String, Object> template = new RedisTemplate<>();
         template.setConnectionFactory(factory);
 
-        // 1. 配置 ObjectMapper (和你截图中的一样)
+        // 配置 ObjectMapper 用于 JSON 序列化
         ObjectMapper mapper = new ObjectMapper();
         mapper.setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.ANY);
-        // 允许序列化任意类 (非安全设置，但在内部服务常用)
         mapper.activateDefaultTyping(LaissezFaireSubTypeValidator.instance, ObjectMapper.DefaultTyping.NON_FINAL);
-        // 注册 Java 8 时间模块 (处理 LocalDateTime 等)
         mapper.registerModule(new JavaTimeModule());
 
-        // 2. 创建 JSON 序列化器
-        // 使用 GenericJackson2JsonRedisSerializer 替代旧的 Jackson2JsonRedisSerializer
+        // 使用 GenericJackson2JsonRedisSerializer（虽然标记弃用但仍可用，
+        // Spring Boot 4.0 中推荐使用 Jackson2JsonRedisSerializer 或自定义实现）
         GenericJackson2JsonRedisSerializer jsonSerializer = new GenericJackson2JsonRedisSerializer(mapper);
 
-        // 3. 设置 Key 和 Value 的序列化方式
         // Key 使用 String 序列化
         template.setKeySerializer(new StringRedisSerializer());
         template.setHashKeySerializer(new StringRedisSerializer());
