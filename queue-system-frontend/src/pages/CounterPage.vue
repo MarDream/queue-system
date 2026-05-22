@@ -166,7 +166,7 @@
         <!-- Call next button -->
         <button
           class="call-next-btn"
-          :disabled="loading || !counterId || !!serving"
+          :disabled="operationLocked || !counterId || !!serving || paused"
           @click="handleCallNext"
         >
           <el-icon><ArrowRight /></el-icon>
@@ -230,6 +230,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { SwitchFilled, Location, UserFilled, Avatar, RefreshRight, ChatLineRound } from '@element-plus/icons-vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { getDisplayTicketNo } from '../utils/ticketUtils'
+import { formatDateTime } from '../utils/dateTime'
 const AiQueryPanel = defineAsyncComponent(() => import('../components/admin/AiQueryPanel.vue'))
 
 const SCREEN_POLL_INTERVAL_MS = 5000
@@ -247,9 +248,7 @@ const currentTime = ref('')
 let timeTimer = null
 
 function updateTime() {
-  const now = new Date()
-  const pad = n => String(n).padStart(2, '0')
-  currentTime.value = `${now.getFullYear()}年${pad(now.getMonth() + 1)}月${pad(now.getDate())}日 ${pad(now.getHours())}时${pad(now.getMinutes())}分${pad(now.getSeconds())}秒`
+  currentTime.value = formatDateTime(new Date(), '')
 }
 const paused = ref(false)
 const serving = ref(null)
@@ -285,6 +284,7 @@ const recalling = ref(false)
 const recallCount = ref(0)
 const waitingQueue = ref([])
 const waitingTotalCount = ref(0)
+const operationLocked = computed(() => loading.value || completing.value || recalling.value)
 
 // Mobile tabs
 const activeTab = ref('queue')
@@ -317,7 +317,7 @@ function loadCounterState() {
       recallCount.value = s.recallCount ?? 0
       todayStats.value[2].value = String(s.recallStats ?? 0)
       todayStats.value[3].value = String(s.skipStats ?? 0)
-      history.value = Array.isArray(s.history) ? s.history : []
+      history.value = normalizeHistory(s.history)
       historyPage.value = 1
       return
     }
@@ -327,6 +327,19 @@ function loadCounterState() {
   todayStats.value[3].value = '0'
   history.value = []
   historyPage.value = 1
+}
+
+function normalizeHistory(items) {
+  if (!Array.isArray(items)) return []
+  const todayPrefix = formatDateTime(new Date(), '').slice(0, 10)
+  return items.map(item => {
+    if (!item || typeof item !== 'object') return item
+    const time = String(item.time || '')
+    if (/^\d{2}:\d{2}$/.test(time)) {
+      return { ...item, time: `${todayPrefix} ${time}:00` }
+    }
+    return item
+  })
 }
 
 function saveCounterState() {
@@ -531,7 +544,9 @@ function formatWait(createdAt) {
 }
 
 async function handleCallNext() {
+  if (operationLocked.value) return
   if (!counterId.value) { ElMessage.warning('请先选择窗口'); return }
+  if (paused.value) { ElMessage.warning('窗口已暂停服务'); return }
   loading.value = true
   try {
     const data = await callNext(counterId.value)
@@ -614,24 +629,20 @@ async function handleComplete() {
   if (!counterId.value || !serving.value || completing.value) return
   const savedNum = serving.value.number
   const savedBiz = serving.value.biz
-  const savedStatus = serving.value.status
-  const dur = Math.round(serveSeconds.value / 60) || 1
-  const now = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-  history.value.unshift({ id: Date.now(), time: now, number: savedNum, biz: savedBiz, duration: dur })
-  historyPage.value = 1
 
   completing.value = true
-  const completedCount = parseInt(todayStats.value[0].value) + 1
-  todayStats.value[0].value = String(completedCount)
-  serving.value = null
-  clearInterval(serveTimer)
-  saveCounterState()
   try {
     await complete(counterId.value)
+    const dur = Math.round(serveSeconds.value / 60) || 1
+    const now = formatDateTime(new Date(), '')
+    history.value.unshift({ id: Date.now(), time: now, number: savedNum, biz: savedBiz, duration: dur })
+    historyPage.value = 1
+    todayStats.value[0].value = String(parseInt(todayStats.value[0].value) + 1)
+    serving.value = null
+    clearInterval(serveTimer)
+    saveCounterState()
     await fetchData()
   } catch (err) {
-    serving.value = { number: savedNum, biz: savedBiz, status: savedStatus }
-    todayStats.value[0].value = String(completedCount - 1)
     ElMessage.error(err.message)
   } finally {
     completing.value = false

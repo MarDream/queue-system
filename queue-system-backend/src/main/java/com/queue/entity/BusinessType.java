@@ -11,6 +11,7 @@ public class BusinessType {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    private Long groupId;              // 所属业务分组ID
     private String name;                // 业务类型名称（全局唯一）
     private String prefix;              // 票号前缀
     private String description;         // 描述
@@ -25,4 +26,7 @@ public class BusinessType {
     private LocalDateTime createdAt;
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
+
+    @TableField(exist = false)
+    private String groupName;          // 所属业务分组名称
 }

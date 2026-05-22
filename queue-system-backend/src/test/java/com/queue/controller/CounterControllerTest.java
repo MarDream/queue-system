@@ -8,6 +8,7 @@ import com.queue.dto.CounterStatsSummaryRow;
 import com.queue.dto.ScreenWaitingTicketRow;
 import com.queue.entity.Counter;
 import com.queue.entity.SysUser;
+import com.queue.entity.Ticket;
 import com.queue.mapper.AnalyticsMapper;
 import com.queue.mapper.BusinessTypeMapper;
 import com.queue.mapper.CounterBusinessMapper;
@@ -151,5 +152,43 @@ class CounterControllerTest {
         assertTrue(result.getData().getWaitingQueue().get(0).getReactivated());
         assertEquals(createdAt, result.getData().getWaitingQueue().get(0).getCreatedAt());
         verify(authContextService).assertRegionAccess(user, 3L);
+    }
+
+    @Test
+    void snapshotResetsStaleBusyCounterToIdle() {
+        SysUser user = new SysUser();
+        user.setId(11L);
+        user.setRole("WINDOW_OPERATOR");
+
+        Counter counter = new Counter();
+        counter.setId(8L);
+        counter.setRegionId(3L);
+        counter.setName("1号窗口");
+        counter.setStatus("busy");
+        counter.setCurrentTicketId(101L);
+
+        Ticket completedTicket = new Ticket();
+        completedTicket.setId(101L);
+        completedTicket.setStatus("completed");
+
+        CounterStatsSummaryRow summary = new CounterStatsSummaryRow();
+        summary.setTodayServedCount(0L);
+
+        when(authContextService.requireCurrentUser(httpServletRequest)).thenReturn(user);
+        when(counterMapper.selectById(8L)).thenReturn(counter);
+        when(counterOperatorMapper.selectCounterIdsByUserId(11L)).thenReturn(List.of(8L));
+        when(ticketMapper.selectById(101L)).thenReturn(completedTicket);
+        when(counterBusinessMapper.selectBusinessTypeIdsByCounterId(8L)).thenReturn(List.of(101L));
+        when(regionService.getDescendantRegionIds(3L)).thenReturn(List.of(3L));
+        when(analyticsMapper.selectCounterStatsSummary(eq(8L), any(), any())).thenReturn(summary);
+        when(analyticsMapper.countCounterWaitingTickets(eq(List.of(3L)), eq(List.of(101L)), any(), any())).thenReturn(0L);
+        when(analyticsMapper.selectCounterWaitingQueue(eq(List.of(3L)), eq(List.of(101L)), any(), any(), eq(20)))
+                .thenReturn(List.of());
+
+        Result<CounterSnapshotResponse> result = controller.getSnapshot(8L, httpServletRequest);
+
+        assertEquals(200, result.getCode());
+        assertEquals("idle", result.getData().getCurrentStatus());
+        verify(counterMapper).updateById(counter);
     }
 }

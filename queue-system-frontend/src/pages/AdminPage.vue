@@ -150,7 +150,6 @@
                 <span class="breadcrumb-sep">/</span>
                 <span class="breadcrumb-current">{{ currentMenuLabel }}</span>
               </nav>
-              <h2 class="content-title">{{ currentMenuLabel || '管理后台' }}</h2>
             </div>
           </div>
         </div>
@@ -1453,7 +1452,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--sp-6);
+  margin-bottom: var(--sp-4);
   padding: 0;
 }
 
@@ -1465,18 +1464,12 @@ onUnmounted(() => {
 
 .content-title-group {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.content-title {
-  font-size: var(--text-2xl);
-  font-weight: 600;
-  color: var(--text-primary);
+  align-items: center;
 }
 
 .panel-host {
   min-height: calc(100% - 88px);
+  width: 100%;
 }
 
 .region-picker-body {
@@ -1605,10 +1598,6 @@ onUnmounted(() => {
   .content-header-left {
     width: 100%;
     align-items: flex-start;
-  }
-
-  .content-title {
-    font-size: var(--text-xl);
   }
 
   .breadcrumb {

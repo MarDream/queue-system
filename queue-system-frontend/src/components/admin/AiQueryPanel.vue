@@ -137,6 +137,7 @@ import { ElMessage } from 'element-plus'
 import { aiQueryApi } from '../../api/admin'
 import request from '../../api'
 import { businessTypeApi, regionBusinessApi } from '../../api/admin'
+import { formatDateTime } from '../../utils/dateTime'
 
 type AiSession = {
   id: string
@@ -217,43 +218,11 @@ function formatRegionLabel(r: RegionOption) {
 }
 
 function formatTimeText(v: any) {
-  if (!v) return ''
-  if (Array.isArray(v) && v.length >= 5) {
-    const hh = String(v[3]).padStart(2, '0')
-    const mm = String(v[4]).padStart(2, '0')
-    return `${hh}:${mm}`
-  }
-  if (typeof v === 'string') {
-    const d = new Date(v)
-    if (!Number.isNaN(d.getTime())) {
-      const hh = String(d.getHours()).padStart(2, '0')
-      const mm = String(d.getMinutes()).padStart(2, '0')
-      return `${hh}:${mm}`
-    }
-    return v
-  }
-  return ''
+  return formatDateTime(v, '')
 }
 
 function formatDateText(v: any) {
-  if (!v) return ''
-  if (Array.isArray(v) && v.length >= 3) {
-    const y = v[0]
-    const m = String(v[1]).padStart(2, '0')
-    const d = String(v[2]).padStart(2, '0')
-    return `${y}-${m}-${d}`
-  }
-  if (typeof v === 'string') {
-    const d = new Date(v)
-    if (!Number.isNaN(d.getTime())) {
-      const y = d.getFullYear()
-      const m = String(d.getMonth() + 1).padStart(2, '0')
-      const day = String(d.getDate()).padStart(2, '0')
-      return `${y}-${m}-${day}`
-    }
-    return v
-  }
-  return ''
+  return formatDateTime(v, '')
 }
 
 function normalizeMessageList(list: any): AiMessage[] {

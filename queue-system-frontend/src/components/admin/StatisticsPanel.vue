@@ -157,6 +157,7 @@ import { ElMessage } from 'element-plus'
 import { useUserStore } from '../../stores/user'
 import { Search, RefreshRight, Download, Setting, Tickets } from '@element-plus/icons-vue'
 import { getDisplayTicketNo } from '../../utils/ticketUtils'
+import { formatDateTime as formatDateTimeDisplay } from '../../utils/dateTime'
 
 const userStore = useUserStore()
 
@@ -355,30 +356,7 @@ function handleExport() {
 }
 
 function formatDateTime(val) {
-  if (!val) return '-'
-
-  // 处理数组格式 [year, month, day, hour, minute, second]
-  if (Array.isArray(val)) {
-    const [y, mo, d, h = 0, mi = 0, s = 0] = val
-    return `${String(y).padStart(4, '0')}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')} ${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-  }
-
-  // 处理 LocalDateTime 对象
-  if (typeof val === 'object' && val !== null && 'year' in val) {
-    const y = String(val.year).padStart(4, '0')
-    const mo = String(val.monthValue).padStart(2, '0')
-    const d = String(val.dayOfMonth).padStart(2, '0')
-    const h = String(val.hour).padStart(2, '0')
-    const mi = String(val.minute).padStart(2, '0')
-    const s = String(val.second).padStart(2, '0')
-    return `${y}-${mo}-${d} ${h}:${mi}:${s}`
-  }
-
-  // ISO 字符串格式化
-  const str = String(val)
-  const datePart = str.substring(0, 10)
-  const timePart = str.substring(11, 19)
-  return `${datePart} ${timePart}`
+  return formatDateTimeDisplay(val, '-')
 }
 
 function statusText(status) {

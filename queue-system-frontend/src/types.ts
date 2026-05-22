@@ -6,10 +6,18 @@ export interface ApiResponse<T = any> {
 
 export interface BusinessType {
   id: number
+  groupId?: number
+  groupName?: string | null
   name: string
   prefix: string
   is_enabled: boolean
   sort_order: number
+}
+
+export interface BusinessTypeGroup {
+  id: number
+  name: string
+  sortOrder?: number
 }
 
 export interface Counter {

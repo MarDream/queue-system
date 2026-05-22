@@ -128,7 +128,7 @@ public class CounterController {
     @GetMapping("/snapshot")
     public Result<CounterSnapshotResponse> getSnapshot(@RequestParam Long counterId,
                                                        HttpServletRequest httpRequest) {
-        Counter counter = requireCounterAccess(counterId, httpRequest);
+        Counter counter = normalizeCounterState(requireCounterAccess(counterId, httpRequest));
 
         LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
         LocalDateTime endOfDay = startOfDay.plusDays(1);
@@ -207,6 +207,34 @@ public class CounterController {
             throw new BusinessException(40003, "票号不存在");
         }
         authContextService.assertRegionAccess(currentUser, ticket.getRegionId());
+    }
+
+    private Counter normalizeCounterState(Counter counter) {
+        if (counter == null) {
+            return null;
+        }
+        if (!CounterStatus.BUSY.getValue().equals(counter.getStatus())) {
+            return counter;
+        }
+        if (hasActiveCurrentTicket(counter.getCurrentTicketId())) {
+            return counter;
+        }
+        counter.setStatus(CounterStatus.IDLE.getValue());
+        counter.setCurrentTicketId(null);
+        counterMapper.updateById(counter);
+        return counter;
+    }
+
+    private boolean hasActiveCurrentTicket(Long ticketId) {
+        if (ticketId == null) {
+            return false;
+        }
+        Ticket ticket = ticketMapper.selectById(ticketId);
+        if (ticket == null) {
+            return false;
+        }
+        return TicketStatus.CALLED.getValue().equals(ticket.getStatus())
+                || TicketStatus.SERVING.getValue().equals(ticket.getStatus());
     }
 
     public static class ReactivateRequest {

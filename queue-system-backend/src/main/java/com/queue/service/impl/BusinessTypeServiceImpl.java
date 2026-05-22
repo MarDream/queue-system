@@ -5,10 +5,12 @@ import com.queue.common.BusinessException;
 import com.queue.common.ResultCode;
 import com.queue.dto.BusinessTypeDetailVO;
 import com.queue.entity.BusinessType;
+import com.queue.entity.BusinessTypeGroup;
 import com.queue.entity.Counter;
 import com.queue.entity.CounterBusiness;
 import com.queue.entity.Region;
 import com.queue.entity.Ticket;
+import com.queue.mapper.BusinessTypeGroupMapper;
 import com.queue.mapper.BusinessTypeMapper;
 import com.queue.mapper.CounterBusinessMapper;
 import com.queue.mapper.CounterMapper;
@@ -29,17 +31,20 @@ import java.util.stream.Collectors;
 public class BusinessTypeServiceImpl implements BusinessTypeService {
 
     private final BusinessTypeMapper businessTypeMapper;
+    private final BusinessTypeGroupMapper businessTypeGroupMapper;
     private final TicketMapper ticketMapper;
     private final CounterBusinessMapper counterBusinessMapper;
     private final CounterMapper counterMapper;
     private final RegionMapper regionMapper;
 
     public BusinessTypeServiceImpl(BusinessTypeMapper businessTypeMapper,
+                                   BusinessTypeGroupMapper businessTypeGroupMapper,
                                    TicketMapper ticketMapper,
                                    CounterBusinessMapper counterBusinessMapper,
                                    CounterMapper counterMapper,
                                    RegionMapper regionMapper) {
         this.businessTypeMapper = businessTypeMapper;
+        this.businessTypeGroupMapper = businessTypeGroupMapper;
         this.ticketMapper = ticketMapper;
         this.counterBusinessMapper = counterBusinessMapper;
         this.counterMapper = counterMapper;
@@ -48,7 +53,12 @@ public class BusinessTypeServiceImpl implements BusinessTypeService {
 
     @Override
     public List<BusinessType> listAll() {
-        return businessTypeMapper.selectList(new QueryWrapper<BusinessType>().orderByAsc("sort_order"));
+        List<BusinessType> list = businessTypeMapper.selectList(
+                new QueryWrapper<BusinessType>()
+                        .eq("deleted", 0)
+                        .orderByAsc("sort_order", "id")
+        );
+        return enrichGroupInfo(list);
     }
 
     @Override
@@ -66,6 +76,7 @@ public class BusinessTypeServiceImpl implements BusinessTypeService {
         if (name.isEmpty()) {
             throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE.getCode(), "业务名称不能为空");
         }
+        validateGroupId(businessType.getGroupId());
         businessType.setName(name);
 
         // If prefix is empty, auto-generate from name
@@ -96,6 +107,7 @@ public class BusinessTypeServiceImpl implements BusinessTypeService {
         }
 
         businessTypeMapper.insert(businessType);
+        populateGroupName(businessType);
         return businessType;
     }
 
@@ -137,8 +149,12 @@ public class BusinessTypeServiceImpl implements BusinessTypeService {
         BusinessType existing = businessTypeMapper.selectById(businessType.getId());
         if (existing == null) throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE);
 
-        String normalizedPrefix = businessType.getPrefix().trim().toUpperCase();
+        String normalizedPrefix = businessType.getPrefix() != null ? businessType.getPrefix().trim().toUpperCase() : "";
         String normalizedName = businessType.getName() != null ? businessType.getName().trim() : "";
+        if (normalizedName.isEmpty()) {
+            throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE.getCode(), "业务名称不能为空");
+        }
+        validateGroupId(businessType.getGroupId());
 
         // Validate prefix format: max 5 uppercase letters only
         if (!normalizedPrefix.matches("^[A-Z]{1,5}$")) {
@@ -164,6 +180,7 @@ public class BusinessTypeServiceImpl implements BusinessTypeService {
         businessType.setPrefix(normalizedPrefix);
         businessType.setName(normalizedName);
         businessTypeMapper.updateById(businessType);
+        populateGroupName(businessType);
         return businessType;
     }
 
@@ -234,5 +251,60 @@ public class BusinessTypeServiceImpl implements BusinessTypeService {
             result.add(vo);
         }
         return result;
+    }
+
+    private void validateGroupId(Long groupId) {
+        if (groupId == null) {
+            throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE.getCode(), "请选择业务分组");
+        }
+        BusinessTypeGroup group = businessTypeGroupMapper.selectById(groupId);
+        if (group == null || Integer.valueOf(1).equals(group.getDeleted())) {
+            throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE.getCode(), "业务分组不存在");
+        }
+    }
+
+    private List<BusinessType> enrichGroupInfo(List<BusinessType> list) {
+        if (list == null || list.isEmpty()) {
+            return list;
+        }
+
+        Map<Long, BusinessTypeGroup> groupMap = businessTypeGroupMapper.selectList(
+                new QueryWrapper<BusinessTypeGroup>()
+                        .eq("deleted", 0)
+                        .orderByAsc("sort_order", "id")
+        ).stream().collect(Collectors.toMap(BusinessTypeGroup::getId, group -> group));
+
+        for (BusinessType item : list) {
+            BusinessTypeGroup group = item.getGroupId() != null ? groupMap.get(item.getGroupId()) : null;
+            item.setGroupName(group != null ? group.getName() : null);
+        }
+
+        list.sort((left, right) -> {
+            Integer leftGroupSort = resolveGroupSortOrder(groupMap, left.getGroupId());
+            Integer rightGroupSort = resolveGroupSortOrder(groupMap, right.getGroupId());
+            int compareGroup = Integer.compare(leftGroupSort, rightGroupSort);
+            if (compareGroup != 0) return compareGroup;
+            int compareSort = Integer.compare(left.getSortOrder() != null ? left.getSortOrder() : 0,
+                    right.getSortOrder() != null ? right.getSortOrder() : 0);
+            if (compareSort != 0) return compareSort;
+            return Long.compare(left.getId() != null ? left.getId() : 0L, right.getId() != null ? right.getId() : 0L);
+        });
+        return list;
+    }
+
+    private Integer resolveGroupSortOrder(Map<Long, BusinessTypeGroup> groupMap, Long groupId) {
+        BusinessTypeGroup group = groupId != null ? groupMap.get(groupId) : null;
+        if (group == null || group.getSortOrder() == null) {
+            return Integer.MAX_VALUE;
+        }
+        return group.getSortOrder();
+    }
+
+    private void populateGroupName(BusinessType businessType) {
+        if (businessType == null || businessType.getGroupId() == null) {
+            return;
+        }
+        BusinessTypeGroup group = businessTypeGroupMapper.selectById(businessType.getGroupId());
+        businessType.setGroupName(group != null ? group.getName() : null);
     }
 }

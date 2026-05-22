@@ -78,9 +78,21 @@ CREATE TABLE IF NOT EXISTS `region` (
     INDEX `idx_parent` (`parent_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='行政区域表';
 
+-- 业务分组表
+CREATE TABLE IF NOT EXISTS `business_type_group` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    `name` VARCHAR(50) NOT NULL COMMENT '分组名称',
+    `sort_order` INT DEFAULT 0 COMMENT '显示排序顺序',
+    `deleted` TINYINT(1) DEFAULT 0 COMMENT '软删除标记：1=已删除，0=正常',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE KEY `uk_group_name` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='业务分组表';
+
 -- 业务类型表（全局定义，不绑定区域）
 CREATE TABLE IF NOT EXISTS `business_type` (
     `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    `group_id` BIGINT NOT NULL COMMENT '所属业务分组ID',
     `name` VARCHAR(50) NOT NULL COMMENT '业务类型名称',
     `prefix` VARCHAR(5) NOT NULL COMMENT '票号前缀代码',
     `description` VARCHAR(200) COMMENT '业务类型描述',
@@ -92,7 +104,8 @@ CREATE TABLE IF NOT EXISTS `business_type` (
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     UNIQUE KEY `uk_name` (`name`),
-    UNIQUE KEY `uk_prefix` (`prefix`)
+    UNIQUE KEY `uk_prefix` (`prefix`),
+    INDEX `idx_group_id` (`group_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='业务类型表（全局）';
 
 -- 区域-业务类型关联表（区域级别的业务启用状态）
@@ -497,13 +510,18 @@ INSERT INTO region (region_name, level, parent_id, region_code, sort_order, anno
 -- =============================================
 -- 初始化全局业务类型数据
 -- =============================================
-INSERT INTO business_type (name, prefix, description, daily_appointment_limit, is_enabled, sort_order) VALUES
-('个人业务', 'A', '个人账户相关业务', 50, 1, 1),
-('对公业务', 'B', '企业客户相关业务', 30, 1, 2),
-('信用卡业务', 'C', '信用卡申请、还款等', 40, 1, 3),
-('贷款业务', 'D', '个人及企业贷款', 20, 1, 4),
-('咨询业务', 'E', '业务咨询服务', 60, 1, 5),
-('VIP业务', 'F', 'VIP客户服务', 10, 1, 6);
+INSERT INTO business_type_group (id, name, sort_order) VALUES
+(1, '基础业务', 1),
+(2, '金融业务', 2),
+(3, '增值服务', 3);
+
+INSERT INTO business_type (group_id, name, prefix, description, daily_appointment_limit, is_enabled, sort_order) VALUES
+(1, '个人业务', 'A', '个人账户相关业务', 50, 1, 1),
+(1, '对公业务', 'B', '企业客户相关业务', 30, 1, 2),
+(2, '信用卡业务', 'C', '信用卡申请、还款等', 40, 1, 3),
+(2, '贷款业务', 'D', '个人及企业贷款', 20, 1, 4),
+(3, '咨询业务', 'E', '业务咨询服务', 60, 1, 5),
+(3, 'VIP业务', 'F', 'VIP客户服务', 10, 1, 6);
 
 -- =============================================
 -- 初始化区域-业务关联

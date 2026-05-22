@@ -348,7 +348,10 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.role-panel { max-width: 1100px; }
+.role-panel {
+  width: 100%;
+  max-width: none;
+}
 
 .filter-bar {
   display: flex;

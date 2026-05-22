@@ -298,6 +298,7 @@ import { Search, Refresh } from '@element-plus/icons-vue'
 import { getDashboard, getTicketList, getBusinessTypeDetail } from '../../api/screen'
 import { getDisplayTicketNo } from '../../utils/ticketUtils'
 import { getTicketStatusText, normalizeTicketStatus } from '../../utils/status'
+import { formatDateTime } from '../../utils/dateTime'
 
 const data = ref({})
 const dialogVisible = ref(false)
@@ -478,21 +479,15 @@ function statusTextCn(status) {
 }
 
 function formatTime(time) {
-  if (!time) return '—'
-  let d
-  if (Array.isArray(time)) {
-    d = new Date(time[0], time[1] - 1, time[2], time[3], time[4], time[5])
-  } else {
-    d = new Date(time)
-  }
-  if (isNaN(d.getTime())) return '—'
-  const pad = n => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  return formatDateTime(time, '—')
 }
 </script>
 
 <style scoped>
-.dashboard { max-width: 900px; }
+.dashboard {
+  width: 100%;
+  max-width: none;
+}
 .summary-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-bottom: 32px; }
 .summary-card {
   background: var(--bg-card);

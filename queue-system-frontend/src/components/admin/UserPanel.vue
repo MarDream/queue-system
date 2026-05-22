@@ -8,22 +8,6 @@
     </div>
 
     <template v-if="activeSubTab === 'users'">
-    <!-- 统计卡片 -->
-    <div class="stats-row">
-      <div class="stat-card">
-        <div class="stat-value">{{ list.length }}</div>
-        <div class="stat-label">用户总数</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ enabledCount }}</div>
-        <div class="stat-label">启用中</div>
-      </div>
-      <div v-if="userStore.isSuperAdmin" class="stat-card">
-        <div class="stat-value">{{ superAdminCount }}</div>
-        <div class="stat-label">超级管理员</div>
-      </div>
-    </div>
-
     <!-- 筛选栏 -->
     <div class="filter-bar">
       <div class="filter-group">
@@ -51,6 +35,12 @@
           @input="handleSearch"
         />
       </div>
+      <div class="filter-group filter-group--compact">
+        <el-button-group>
+          <el-button @click="expandAllRows">展开全部</el-button>
+          <el-button @click="collapseAllRows">收起层级</el-button>
+        </el-button-group>
+      </div>
       <div class="filter-actions">
         <el-button v-if="isAdmin" :loading="downloadingTemplate" @click="downloadTemplate">
           <el-icon class="btn-i"><Download /></el-icon> 批量导入模板
@@ -74,54 +64,109 @@
         </el-button>
       </div>
     </div>
+    <div class="view-summary">
+      <span class="view-summary__mode">按区域层级展示</span>
+      <span class="view-summary__text">当前显示 {{ visibleRegionCount }} 个区域分组，{{ visibleUserCount }} 个用户</span>
+      <div class="view-summary__stats">
+        <span class="view-stat">
+          <span class="view-stat__label">总用户</span>
+          <strong class="view-stat__value">{{ list.length }}</strong>
+        </span>
+        <span class="view-stat">
+          <span class="view-stat__label">启用中</span>
+          <strong class="view-stat__value is-success">{{ enabledCount }}</strong>
+        </span>
+        <span v-if="userStore.isSuperAdmin" class="view-stat">
+          <span class="view-stat__label">超级管理员</span>
+          <strong class="view-stat__value is-danger">{{ superAdminCount }}</strong>
+        </span>
+      </div>
+    </div>
 
     <!-- 用户列表 -->
     <div class="table-container">
-      <el-table :data="filteredList" v-loading="loading" stripe empty-text="暂无数据！">
-        <el-table-column prop="username" label="用户名" min-width="120">
+      <el-table
+        :key="tableRenderKey"
+        :data="pagedUserTreeData"
+        v-loading="loading"
+        stripe
+        row-key="rowKey"
+        :tree-props="{ children: 'children' }"
+        :default-expand-all="expandAll"
+        :row-class-name="rowClassName"
+        :max-height="tableMaxHeight"
+        empty-text="暂无数据！"
+      >
+        <el-table-column prop="username" label="用户名" min-width="220">
           <template #default="{ row }">
-            <div class="user-cell">
+            <div v-if="row.rowType === REGION_ROW_TYPE" class="region-node">
+              <div class="region-node__title">
+                <span class="region-node__icon" :class="{ 'is-virtual': row.isVirtualRegion }">
+                  {{ row.isVirtualRegion ? '⌘' : '◈' }}
+                </span>
+                <span class="region-node__name">{{ row.name }}</span>
+                <el-tag
+                  size="small"
+                  effect="plain"
+                  :type="row.isVirtualRegion ? (row.virtualTagType || 'info') : levelTagType(row.level)"
+                >
+                  {{ row.isVirtualRegion ? row.virtualTagLabel : levelLabel(row.level) }}
+                </el-tag>
+              </div>
+            </div>
+            <div v-else class="user-cell">
               <div class="user-avatar">{{ row.username?.charAt(0).toUpperCase() }}</div>
               <span class="username">{{ row.username }}</span>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="name" label="姓名" min-width="100">
+        <el-table-column prop="name" label="姓名" min-width="130">
           <template #default="{ row }">
-            <span class="name-text">{{ row.name || '—' }}</span>
+            <span v-if="row.rowType === REGION_ROW_TYPE" class="region-summary">
+              本级 {{ row.directUserCount }} / 累计 {{ row.userCount }}
+            </span>
+            <span v-else class="name-text">{{ row.name || '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="email" label="邮箱" min-width="160" show-overflow-tooltip>
+        <el-table-column prop="email" label="邮箱" min-width="210" show-overflow-tooltip>
           <template #default="{ row }">
-            <span class="name-text">{{ row.email || '—' }}</span>
+            <span class="name-text">{{ row.rowType === USER_ROW_TYPE ? (row.email || '—') : '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="角色" width="140">
+        <el-table-column label="角色" width="120">
           <template #default="{ row }">
-            <el-tag :type="getRoleType(row.role)" effect="light" round>
+            <el-tag v-if="row.rowType === USER_ROW_TYPE" :type="getRoleType(row.role)" effect="light" round>
               {{ getRoleName(row.role) }}
             </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="管辖区域" width="150">
-          <template #default="{ row }">
-            <span class="region-text">{{ getRegionName(row.regionId) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)" size="small" effect="plain">
-              {{ statusLabel(row.status) }}
+            <el-tag v-else type="info" effect="plain" round>
+              区域分组
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="最后登录" width="160">
+        <el-table-column label="管辖区域" min-width="300" show-overflow-tooltip>
           <template #default="{ row }">
-            <span class="time-text">{{ formatTime(row.lastLoginAt) }}</span>
+            <div v-if="row.rowType === USER_ROW_TYPE" class="region-cell">
+              <span class="region-text">{{ row.regionPath || '—' }}</span>
+            </div>
+            <span v-else class="region-text">{{ row.fullPath || '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right" align="center">
+        <el-table-column label="状态" width="90">
           <template #default="{ row }">
+            <el-tag v-if="row.rowType === USER_ROW_TYPE" :type="statusTagType(row.status)" size="small" effect="plain">
+              {{ statusLabel(row.status) }}
+            </el-tag>
+            <span v-else class="cell-dash">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="最后登录" width="190">
+          <template #default="{ row }">
+            <span class="time-text">{{ row.rowType === USER_ROW_TYPE ? formatTime(row.lastLoginAt) : '—' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="120" fixed="right" align="center">
+          <template #default="{ row }">
+            <template v-if="row.rowType === USER_ROW_TYPE">
             <el-dropdown trigger="click" @command="(cmd) => handleAction(cmd, row)">
               <el-button size="small" link type="primary" class="settings-btn">
                 <svg class="gear-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -146,9 +191,21 @@
                 <line x1="14" y1="11" x2="14" y2="17"/>
               </svg>
             </el-button>
+            </template>
+            <span v-else class="cell-dash">—</span>
           </template>
         </el-table-column>
       </el-table>
+      <div class="table-footer">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[8, 12, 20, 30]"
+          :total="rootGroupTotal"
+          layout="total, sizes, prev, pager, next"
+          background
+        />
+      </div>
     </div>
 
     <!-- 新增/编辑弹窗 -->
@@ -266,7 +323,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Plus, Download, Upload } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
@@ -274,6 +331,7 @@ import request from '../../api/index'
 import { userPermissionApi } from '../../api/admin'
 import { useUserStore } from '../../stores/user'
 import RolePanel from './RolePanel.vue'
+import { formatDateTime } from '../../utils/dateTime'
 
 const props = defineProps({
   initialTab: {
@@ -302,6 +360,25 @@ const isEdit = ref(false)
 const saving = ref(false)
 const searchKeyword = ref('')
 const filterRegionId = ref(null)
+const expandAll = ref(true)
+const tableRenderKey = ref(0)
+const currentPage = ref(1)
+const pageSize = ref(8)
+const tableMaxHeight = ref(560)
+const REGION_ROW_TYPE = 'region'
+const USER_ROW_TYPE = 'user'
+const ROOT_REGION_KEY = 'root'
+const PLATFORM_NODE_KEY = 'platform-root'
+const DETACHED_NODE_KEY = 'detached-root'
+
+watch([searchKeyword, filterRegionId], () => {
+  currentPage.value = 1
+  expandAllRows()
+})
+
+watch(pageSize, () => {
+  currentPage.value = 1
+})
 
 // 批量导入相关
 const downloadingTemplate = ref(false)
@@ -428,6 +505,50 @@ const availableRoles = computed(() => {
 
 // 区域树形结构
 const regionTree = computed(() => buildRegionTree(regions.value))
+const regionMap = computed(() => {
+  const map = new Map()
+  ;(regions.value || []).forEach(region => {
+    const regionId = normalizeRegionId(region.id)
+    if (regionId != null) {
+      map.set(regionId, region)
+    }
+  })
+  return map
+})
+const regionChildrenMap = computed(() => {
+  const map = new Map()
+  ;(regions.value || [])
+    .slice()
+    .sort(compareRegionOrder)
+    .forEach(region => {
+      const parentKey = normalizeRegionId(region.parentId) ?? ROOT_REGION_KEY
+      if (!map.has(parentKey)) {
+        map.set(parentKey, [])
+      }
+      map.get(parentKey).push(region)
+    })
+  return map
+})
+
+function normalizeRegionId(value) {
+  if (value === null || value === undefined || value === '') return null
+  const regionId = Number(value)
+  return Number.isFinite(regionId) ? regionId : null
+}
+
+function compareRegionOrder(a, b) {
+  const sortDiff = Number(a?.sortOrder || 0) - Number(b?.sortOrder || 0)
+  if (sortDiff !== 0) return sortDiff
+  return Number(a?.id || 0) - Number(b?.id || 0)
+}
+
+function compareUserOrder(a, b) {
+  const primary = String(a?.name || a?.username || '').localeCompare(String(b?.name || b?.username || ''), 'zh-CN')
+  if (primary !== 0) return primary
+  const secondary = String(a?.username || '').localeCompare(String(b?.username || ''), 'zh-CN')
+  if (secondary !== 0) return secondary
+  return Number(a?.id || 0) - Number(b?.id || 0)
+}
 
 function buildRegionTree(flatRegions) {
   if (!flatRegions || flatRegions.length === 0) return []
@@ -444,7 +565,34 @@ function buildRegionTree(flatRegions) {
       map[r.parentId].children.push(node)
     }
   })
+  const sortNodes = (nodes) => {
+    nodes.sort(compareRegionOrder)
+    nodes.forEach(node => {
+      if (node.children?.length) {
+        sortNodes(node.children)
+      }
+    })
+  }
+  sortNodes(roots)
   return roots
+}
+
+function levelTagType(level) {
+  const map = {
+    city: 'danger',
+    town: 'warning',
+    street: 'success'
+  }
+  return map[level] || 'info'
+}
+
+function levelLabel(level) {
+  const map = {
+    city: '市级',
+    town: '镇/区级',
+    street: '街道级'
+  }
+  return map[level] || '未知层级'
 }
 
 function filterRegionByName(query, node) {
@@ -457,9 +605,12 @@ function filterRegionByName(query, node) {
 
 function getDescendantRegionIds(parentId, flatRegions) {
   const ids = new Set()
+  const normalizedParentId = normalizeRegionId(parentId)
   flatRegions.forEach(r => {
-    if (r.parentId === parentId) {
-      ids.add(r.id)
+    if (normalizeRegionId(r.parentId) === normalizedParentId) {
+      const childId = normalizeRegionId(r.id)
+      if (childId == null) return
+      ids.add(childId)
       getDescendantRegionIds(r.id, flatRegions).forEach(childId => ids.add(childId))
     }
   })
@@ -482,8 +633,14 @@ const filteredList = computed(() => {
   // 区域筛选（含后代区域递归匹配）
   if (filterRegionId.value) {
     const allowedIds = getDescendantRegionIds(filterRegionId.value, regions.value)
-    allowedIds.add(filterRegionId.value)
-    result = result.filter(u => u.regionId && allowedIds.has(u.regionId))
+    const selectedRegionId = normalizeRegionId(filterRegionId.value)
+    if (selectedRegionId != null) {
+      allowedIds.add(selectedRegionId)
+    }
+    result = result.filter(u => {
+      const userRegionId = normalizeRegionId(u.regionId)
+      return userRegionId != null && allowedIds.has(userRegionId)
+    })
   }
   // 关键词搜索
   if (searchKeyword.value) {
@@ -492,11 +649,130 @@ const filteredList = computed(() => {
       u.username?.toLowerCase().includes(kw) ||
       u.name?.toLowerCase().includes(kw) ||
       u.email?.toLowerCase().includes(kw) ||
-      getRoleName(u.role)?.toLowerCase().includes(kw)
+      getRoleName(u.role)?.toLowerCase().includes(kw) ||
+      getRegionPathText(u.regionId).toLowerCase().includes(kw)
     )
   }
   return result
 })
+
+const userTreeData = computed(() => {
+  const usersByRegion = new Map()
+  const platformUsers = []
+  const detachedUsers = []
+  const matchedUsers = filteredList.value.slice().sort(compareUserOrder)
+
+  matchedUsers.forEach(user => {
+    const regionId = normalizeRegionId(user.regionId)
+    if (regionId == null) {
+      platformUsers.push(user)
+      return
+    }
+    if (!regionMap.value.has(regionId)) {
+      detachedUsers.push(user)
+      return
+    }
+    if (!usersByRegion.has(regionId)) {
+      usersByRegion.set(regionId, [])
+    }
+    usersByRegion.get(regionId).push(user)
+  })
+
+  const buildUserNode = (user) => ({
+    ...user,
+    rowKey: `user-${user.id}`,
+    rowType: USER_ROW_TYPE,
+    regionPath: getRegionPathText(user.regionId)
+  })
+
+  const buildRegionNode = (region) => {
+    const regionId = normalizeRegionId(region.id)
+    if (regionId == null) return null
+
+    const childRegionNodes = (regionChildrenMap.value.get(regionId) || [])
+      .map(buildRegionNode)
+      .filter(Boolean)
+    const directUsers = (usersByRegion.get(regionId) || [])
+      .slice()
+      .sort(compareUserOrder)
+      .map(buildUserNode)
+    const userCount = directUsers.length + childRegionNodes.reduce((sum, node) => sum + node.userCount, 0)
+
+    if (userCount === 0) return null
+
+    return {
+      rowKey: `region-${regionId}`,
+      rowType: REGION_ROW_TYPE,
+      isVirtualRegion: false,
+      virtualTagLabel: '',
+      virtualTagType: '',
+      regionId,
+      name: region.name,
+      level: region.level,
+      fullPath: getRegionPathText(regionId),
+      directUserCount: directUsers.length,
+      userCount,
+      children: [...childRegionNodes, ...directUsers]
+    }
+  }
+
+  const buildVirtualNode = (key, name, users, tagLabel, tagType) => ({
+    rowKey: key,
+    rowType: REGION_ROW_TYPE,
+    isVirtualRegion: true,
+    virtualTagLabel: tagLabel,
+    virtualTagType: tagType,
+    name,
+    level: '',
+    fullPath: name,
+    directUserCount: users.length,
+    userCount: users.length,
+    children: users.slice().sort(compareUserOrder).map(buildUserNode)
+  })
+
+  const selectedRegionId = normalizeRegionId(filterRegionId.value)
+  const rootRegions = selectedRegionId != null
+    ? [regionMap.value.get(selectedRegionId)].filter(Boolean)
+    : (regionChildrenMap.value.get(ROOT_REGION_KEY) || [])
+
+  const tree = rootRegions.map(buildRegionNode).filter(Boolean)
+
+  if (selectedRegionId == null && platformUsers.length > 0) {
+    tree.unshift(buildVirtualNode(PLATFORM_NODE_KEY, '平台级用户', platformUsers, '平台级', 'danger'))
+  }
+  if (selectedRegionId == null && detachedUsers.length > 0) {
+    tree.push(buildVirtualNode(DETACHED_NODE_KEY, '未匹配区域', detachedUsers, '异常区域', 'warning'))
+  }
+
+  return tree
+})
+const rootGroupTotal = computed(() => userTreeData.value.length)
+const pagedUserTreeData = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  return userTreeData.value.slice(start, end)
+})
+const visibleUserCount = computed(() => filteredList.value.length)
+const visibleRegionCount = computed(() => countRegionNodes(userTreeData.value))
+
+watch(rootGroupTotal, (total) => {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize.value))
+  if (currentPage.value > totalPages) {
+    currentPage.value = totalPages
+  }
+})
+
+function syncTableMaxHeight() {
+  if (typeof window === 'undefined') return
+  tableMaxHeight.value = Math.max(window.innerHeight - 360, 360)
+}
+
+function countRegionNodes(nodes) {
+  return (nodes || []).reduce((sum, node) => {
+    if (node.rowType !== REGION_ROW_TYPE) return sum
+    return sum + 1 + countRegionNodes(node.children || [])
+  }, 0)
+}
 
 const enabledCount = computed(() => list.value.filter(u => u.status === 1).length)
 const superAdminCount = computed(() => list.value.filter(u => u.role === 'SUPER_ADMIN').length)
@@ -531,6 +807,20 @@ async function fetchRoles() {
 
 function handleSearch() {
   // 搜索由 computed 属性处理
+}
+
+function rerenderTreeTable() {
+  tableRenderKey.value += 1
+}
+
+function expandAllRows() {
+  expandAll.value = true
+  rerenderTreeTable()
+}
+
+function collapseAllRows() {
+  expandAll.value = false
+  rerenderTreeTable()
 }
 
 function onRoleChange() {
@@ -816,17 +1106,38 @@ function getRoleType(role) {
 }
 
 function getRegionName(regionId) {
-  if (!regionId) return '—'
-  const region = regions.value.find(r => r.id === regionId)
+  const normalizedRegionId = normalizeRegionId(regionId)
+  if (normalizedRegionId == null) return '—'
+  const region = regionMap.value.get(normalizedRegionId)
   return region ? region.name : '—'
 }
 
-function formatTime(time) {
-  if (!time) return '—'
-  if (Array.isArray(time)) {
-    return `${time[0]}-${String(time[1]).padStart(2, '0')}-${String(time[2]).padStart(2, '0')} ${String(time[3]).padStart(2, '0')}:${String(time[4]).padStart(2, '0')}`
+function getRegionPathText(regionId) {
+  const normalizedRegionId = normalizeRegionId(regionId)
+  if (normalizedRegionId == null) return '—'
+  const pathNames = []
+  const visited = new Set()
+  let currentId = normalizedRegionId
+
+  while (currentId != null && !visited.has(currentId)) {
+    visited.add(currentId)
+    const current = regionMap.value.get(currentId)
+    if (!current) {
+      break
+    }
+    pathNames.unshift(current.name)
+    currentId = normalizeRegionId(current.parentId)
   }
-  return time
+
+  return pathNames.length > 0 ? pathNames.join(' / ') : '—'
+}
+
+function rowClassName({ row }) {
+  return row.rowType === REGION_ROW_TYPE ? 'user-region-row' : ''
+}
+
+function formatTime(time) {
+  return formatDateTime(time, '—')
 }
 
 // ==================== 批量导入 ====================
@@ -965,67 +1276,38 @@ function showImportResult(result) {
 }
 
 onMounted(() => {
+  syncTableMaxHeight()
+  window.addEventListener('resize', syncTableMaxHeight)
   fetchList()
   fetchRegions()
   fetchRoles()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', syncTableMaxHeight)
 })
 </script>
 
 <style scoped>
 .user-panel {
-  max-width: 1200px;
+  width: 100%;
+  max-width: none;
 }
 
 .section-tabs {
   display: flex;
   align-items: center;
-  margin-bottom: var(--sp-5);
-}
-
-.stats-row {
-  display: flex;
-  gap: var(--sp-4);
-  margin-bottom: var(--sp-5);
-}
-
-.stat-card {
-  background: linear-gradient(135deg, var(--primary) 0%, var(--accent-dim) 100%);
-  color: #ffffff;
-  padding: var(--sp-4) var(--sp-6);
-  border-radius: var(--radius-lg);
-  min-width: 140px;
-  box-shadow: var(--glow-accent);
-}
-
-.stat-card:nth-child(2) {
-  background: linear-gradient(135deg, var(--success) 0%, #529b2e 100%);
-  box-shadow: 0 2px 8px var(--success-glow);
-}
-
-.stat-card:nth-child(3) {
-  background: linear-gradient(135deg, var(--danger) 0%, #c45656 100%);
-  box-shadow: 0 2px 8px var(--danger-glow);
-}
-
-.stat-value {
-  font-size: var(--text-2xl);
-  font-weight: 700;
-  line-height: 1.2;
-}
-
-.stat-label {
-  font-size: var(--text-xs);
-  opacity: 0.9;
-  margin-top: var(--sp-1);
+  margin-bottom: var(--sp-4);
 }
 
 .filter-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--sp-4);
-  margin-bottom: var(--sp-4);
+  margin-bottom: var(--sp-3);
   background: var(--bg-card);
-  padding: var(--sp-4) var(--sp-5);
+  padding: var(--sp-3) var(--sp-4);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
 }
@@ -1036,6 +1318,10 @@ onMounted(() => {
   gap: var(--sp-2);
 }
 
+.filter-group--compact {
+  margin-left: auto;
+}
+
 .filter-label {
   font-size: var(--text-sm);
   color: var(--text-secondary);
@@ -1043,7 +1329,66 @@ onMounted(() => {
 }
 
 .filter-actions {
-  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.view-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin: -2px 0 var(--sp-3);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.view-summary__mode {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(64, 158, 255, 0.08);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.view-summary__stats {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-left: 6px;
+}
+
+.view-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.view-stat__label {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.view-stat__value {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 1;
+}
+
+.view-stat__value.is-success {
+  color: var(--success);
+}
+
+.view-stat__value.is-danger {
+  color: var(--danger);
 }
 
 .btn-icon {
@@ -1058,15 +1403,96 @@ onMounted(() => {
   overflow: hidden;
 }
 
+.table-container :deep(.el-table .cell) {
+  padding-top: 6px;
+  padding-bottom: 6px;
+  line-height: 1.35;
+}
+
+.table-container :deep(.el-table__inner-wrapper::before) {
+  display: none;
+}
+
+.table-container :deep(.el-table__body-wrapper) {
+  overflow-y: auto;
+}
+
+.table-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 14px 12px;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+}
+
+.region-node {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+}
+
+.region-node__title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.region-node__icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(64, 158, 255, 0.12);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.region-node__icon.is-virtual {
+  background: rgba(230, 162, 60, 0.16);
+  color: var(--warning);
+}
+
+.region-node__name {
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.region-path,
+.region-summary,
+.cell-dash {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
 .user-cell {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
+  position: relative;
+  padding-left: 14px;
+}
+
+.user-cell::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 8px;
+  height: 1px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.85);
+  transform: translateY(-50%);
 }
 
 .user-avatar {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--primary), var(--accent-dim));
   color: #ffffff;
@@ -1080,12 +1506,33 @@ onMounted(() => {
 .username {
   font-weight: 500;
   color: var(--text-primary);
+  line-height: 1.2;
 }
 
 .name-text,
 .region-text,
 .time-text {
   color: var(--text-secondary);
+}
+
+.region-cell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.region-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:deep(.user-region-row > td.el-table__cell) {
+  background: rgba(64, 158, 255, 0.05);
+}
+
+:deep(.user-region-row:hover > td.el-table__cell) {
+  background: rgba(64, 158, 255, 0.08) !important;
 }
 
 /* 操作列 - 小螺丝 + 小垃圾桶 */

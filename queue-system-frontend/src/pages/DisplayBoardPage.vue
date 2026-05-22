@@ -7,7 +7,7 @@
       </div>
       <div class="header-right">
         <div class="time-box">
-          <span class="time-date">{{ currentDate }} {{ weekDay }}</span>
+          <span class="time-date">{{ weekDay }}</span>
           <span class="time-clock">{{ currentTime }}</span>
         </div>
       </div>
@@ -112,11 +112,11 @@ import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { getScreenData } from '../api/screen'
 import { Bell, Timer, Cellphone, Right, Document } from '@element-plus/icons-vue'
+import { formatDateTime } from '../utils/dateTime'
 
 const route = useRoute()
 
 const currentTime = ref('')
-const currentDate = ref('')
 const weekDay = ref('')
 const regionName = ref('')
 const notice = ref('')
@@ -142,14 +142,7 @@ function updateClock() {
   const now = new Date()
   const weekdays = ['周日','周一','周二','周三','周四','周五','周六']
   weekDay.value = weekdays[now.getDay()]
-  const y = now.getFullYear()
-  const m = String(now.getMonth() + 1).padStart(2,'0')
-  const d = String(now.getDate()).padStart(2,'0')
-  currentDate.value = `${y}-${m}-${d}`
-  const h = String(now.getHours()).padStart(2,'0')
-  const mi = String(now.getMinutes()).padStart(2,'0')
-  const s = String(now.getSeconds()).padStart(2,'0')
-  currentTime.value = `${h}:${mi}:${s}`
+  currentTime.value = formatDateTime(now, '')
 }
 
 async function fetchData() {

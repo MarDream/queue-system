@@ -1,6 +1,6 @@
 import axios from 'axios'
 import request from './index'
-import type { BusinessType, Counter, CounterDTO, Region, SysMenu, SysButton, SysRole } from '../types'
+import type { BusinessType, BusinessTypeGroup, Counter, CounterDTO, Region, SysMenu, SysButton, SysRole } from '../types'
 
 function buildAuthHeaders(): Record<string, string> {
   const token = localStorage.getItem('token')
@@ -39,6 +39,20 @@ export const businessTypeApi = {
 
   delete: (id: number) =>
     request.delete<void>(`/admin/business-types/${id}`)
+}
+
+export const businessTypeGroupApi = {
+  list: () =>
+    request.get<BusinessTypeGroup[]>('/admin/business-type-groups'),
+
+  create: (data: Partial<BusinessTypeGroup>) =>
+    request.post<BusinessTypeGroup>('/admin/business-type-groups', data),
+
+  update: (id: number, data: Partial<BusinessTypeGroup>) =>
+    request.put<BusinessTypeGroup>(`/admin/business-type-groups/${id}`, data),
+
+  delete: (id: number) =>
+    request.delete<void>(`/admin/business-type-groups/${id}`)
 }
 
 // 窗口 API

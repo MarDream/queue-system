@@ -273,6 +273,7 @@ import { useUserStore } from '../../stores/user'
 import QRCode from 'qrcode'
 import QrPreviewCard from './QrPreviewCard.vue'
 import QrPrintDialog from './QrPrintDialog.vue'
+import { formatDateTime } from '../../utils/dateTime'
 
 const userStore = useUserStore()
 
@@ -662,17 +663,7 @@ function truncateUrl(url) {
 }
 
 function formatDate(dateStr) {
-  if (!dateStr) return ''
-  // 支持数组格式 [2026, 4, 12, 23, 11, 46] 或字符串格式
-  let d
-  if (Array.isArray(dateStr)) {
-    d = new Date(dateStr[0], dateStr[1] - 1, dateStr[2], dateStr[3] || 0, dateStr[4] || 0, dateStr[5] || 0)
-  } else {
-    d = new Date(dateStr)
-  }
-  if (isNaN(d.getTime())) return ''
-  const pad = n => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return formatDateTime(dateStr, '—')
 }
 
 async function previewQr(item) {
@@ -746,7 +737,10 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.qrcode-panel { max-width: 1400px; }
+.qrcode-panel {
+  width: 100%;
+  max-width: none;
+}
 
 /* Editor Section: Config + Preview */
 .editor-section {

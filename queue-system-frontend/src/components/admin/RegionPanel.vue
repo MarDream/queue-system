@@ -56,7 +56,7 @@
           {{ getFullPath(row) }}
         </template>
       </el-table-column>
-      <el-table-column label="创建时间" width="120" align="center">
+      <el-table-column label="创建时间" width="190" align="center">
         <template #default="{ row }">
           {{ formatCreatedAt(row.createdAt) }}
         </template>
@@ -115,6 +115,11 @@
         </div>
         <el-table :data="regionBusinessList" empty-text="暂无数据！" style="margin-top:12px">
           <el-table-column prop="name" label="业务名称" />
+          <el-table-column prop="groupName" label="所属分组" width="130">
+            <template #default="{ row }">
+              <el-tag size="small" effect="plain">{{ row.groupName || '未分组' }}</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column prop="prefix" label="前缀" width="80" />
           <el-table-column prop="dailyAppointmentLimit" label="每日预约限额" width="120" />
           <el-table-column label="状态" width="100">
@@ -196,8 +201,15 @@
         <el-icon><InfoFilled /></el-icon>
         <span>请选择要关联到「{{ currentRegion?.name }}」的业务类型</span>
       </div>
+      <div class="select-toolbar">
+        <el-input
+          v-model="businessKeyword"
+          clearable
+          placeholder="搜索分组名称或业务名称"
+        />
+      </div>
       <el-table
-        :data="availableBusinessList"
+        :data="filteredAvailableBusinessList"
         empty-text="暂无数据"
         @selection-change="handleSelectionChange"
         :row-class-name="tableRowClassName"
@@ -210,6 +222,11 @@
               <el-tag :type="row.isEnabled ? 'success' : 'info'" size="small">{{ row.prefix }}</el-tag>
               <span>{{ row.name }}</span>
             </div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="groupName" label="所属分组" width="130" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-tag size="small" effect="plain">{{ row.groupName || '未分组' }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
@@ -274,6 +291,7 @@ import request from '../../api/index'
 import { regionApi, regionBusinessApi } from '../../api/admin'
 import Sortable from 'sortablejs'
 import { useUserStore } from '../../stores/user'
+import { formatDateTime } from '../../utils/dateTime'
 
 const userStore = useUserStore()
 
@@ -534,12 +552,7 @@ function extractPid(el) {
 
 // 格式化创建时间
 function formatCreatedAt(val) {
-  if (!val) return '-'
-  const d = Array.isArray(val) ? new Date(val[0], val[1] - 1, val[2], val[3] || 0, val[4] || 0, val[5] || 0) : new Date(val)
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
+  return formatDateTime(val, '-')
 }
 
 // 获取完整区域路径（如：深圳市-南山区）
@@ -600,6 +613,7 @@ const currentRegion = ref(null)
 const regionBusinessList = ref([])
 const availableBusinessList = ref([])
 const selectedBusinessIds = ref([])
+const businessKeyword = ref('')
 const editingBusiness = ref(null)
 const editingBusinessForm = ref({ dailyAppointmentLimit: 50, isEnabled: true })
 const selectBusinessVisible = ref(false)
@@ -611,6 +625,18 @@ const codeHasError = ref(false)
 const codeToast = ref({ show: false, region: '', code: '', duration: 3000 })
 let editingId = null
 let codeToastTimer = null
+
+const filteredAvailableBusinessList = computed(() => {
+  const normalizedKeyword = businessKeyword.value.trim().toLowerCase()
+  if (!normalizedKeyword) {
+    return availableBusinessList.value
+  }
+  return availableBusinessList.value.filter(item =>
+    [item.name, item.groupName, item.prefix, item.description]
+      .filter(Boolean)
+      .some(value => String(value).toLowerCase().includes(normalizedKeyword))
+  )
+})
 
 async function openCreate(level, parentId = null, parentLevel = null) {
   isEdit.value = false
@@ -734,6 +760,8 @@ async function loadRegionBusiness(regionId) {
 async function openSelectBusiness() {
   try {
     availableBusinessList.value = await regionBusinessApi.listAvailable(currentRegion.value.id)
+    selectedBusinessIds.value = []
+    businessKeyword.value = ''
     selectBusinessVisible.value = true
   } catch {
     ElMessage.error('加载失败')
@@ -823,7 +851,10 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.region-panel { max-width: 1200px; }
+.region-panel {
+  width: 100%;
+  max-width: none;
+}
 
 /* 搜索栏 */
 .filter-bar {
@@ -914,6 +945,9 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.select-toolbar {
+  margin-bottom: 12px;
 }
 .selected-count {
   margin-top: 12px;

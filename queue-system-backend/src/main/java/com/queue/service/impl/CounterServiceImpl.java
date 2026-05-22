@@ -64,7 +64,7 @@ public class CounterServiceImpl implements CounterService {
             throw new BusinessException(ResultCode.COUNTER_NOT_OPERABLE);
         }
         try {
-            Counter counter = counterMapper.selectById(counterId);
+            Counter counter = normalizeCounterState(counterMapper.selectById(counterId));
             if (counter == null) throw new BusinessException(ResultCode.COUNTER_NOT_OPERABLE);
             if (!CounterStatus.IDLE.getValue().equals(counter.getStatus()) || counter.getCurrentTicketId() != null) {
                 throw new BusinessException(ResultCode.COUNTER_NOT_OPERABLE);
@@ -322,7 +322,7 @@ public class CounterServiceImpl implements CounterService {
             throw new BusinessException(ResultCode.COUNTER_NOT_OPERABLE);
         }
         try {
-            Counter counter = counterMapper.selectById(counterId);
+            Counter counter = normalizeCounterState(counterMapper.selectById(counterId));
             if (counter == null) throw new BusinessException(ResultCode.COUNTER_NOT_OPERABLE);
             if (CounterStatus.BUSY.getValue().equals(counter.getStatus())) {
                 throw new BusinessException(ResultCode.COUNTER_NOT_OPERABLE);
@@ -382,5 +382,33 @@ public class CounterServiceImpl implements CounterService {
         } finally {
             queueService.releaseLock(lockKey);
         }
+    }
+
+    private Counter normalizeCounterState(Counter counter) {
+        if (counter == null) {
+            return null;
+        }
+        if (!CounterStatus.BUSY.getValue().equals(counter.getStatus())) {
+            return counter;
+        }
+        if (hasActiveCurrentTicket(counter.getCurrentTicketId())) {
+            return counter;
+        }
+        counter.setStatus(CounterStatus.IDLE.getValue());
+        counter.setCurrentTicketId(null);
+        counterMapper.updateById(counter);
+        return counter;
+    }
+
+    private boolean hasActiveCurrentTicket(Long ticketId) {
+        if (ticketId == null) {
+            return false;
+        }
+        Ticket ticket = ticketMapper.selectById(ticketId);
+        if (ticket == null) {
+            return false;
+        }
+        return TicketStatus.CALLED.getValue().equals(ticket.getStatus())
+                || TicketStatus.SERVING.getValue().equals(ticket.getStatus());
     }
 }

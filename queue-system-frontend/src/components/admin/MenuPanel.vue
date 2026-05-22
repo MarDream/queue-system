@@ -531,7 +531,10 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.menu-panel { max-width: 1200px; }
+.menu-panel {
+  width: 100%;
+  max-width: none;
+}
 
 .filter-bar {
   display: flex;

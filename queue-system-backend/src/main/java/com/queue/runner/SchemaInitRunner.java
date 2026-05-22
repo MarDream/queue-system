@@ -88,6 +88,9 @@ public class SchemaInitRunner implements CommandLineRunner {
 
             // 迁移：添加智能问数菜单（仅超级管理员）
             migrateAiMenu(conn);
+
+            // 迁移：补齐业务分组与业务归组字段
+            migrateBusinessTypeGroups(conn);
         }
     }
 
@@ -220,6 +223,87 @@ public class SchemaInitRunner implements CommandLineRunner {
         } catch (Exception e) {
             System.err.println("智能问数菜单迁移失败: " + e.getMessage());
         }
+    }
+
+    private void migrateBusinessTypeGroups(Connection conn) {
+        try {
+            ensureBusinessTypeGroupTable(conn);
+            ensureColumn(conn, "business_type", "group_id",
+                    "ALTER TABLE business_type ADD COLUMN group_id BIGINT NULL COMMENT '所属业务分组ID' AFTER id");
+            ensureIndex(conn, "business_type", "idx_group_id",
+                    "CREATE INDEX idx_group_id ON business_type (group_id)");
+
+            Long defaultGroupId = ensureDefaultBusinessTypeGroup(conn);
+            if (defaultGroupId != null) {
+                try (PreparedStatement stmt = conn.prepareStatement(
+                        "UPDATE business_type SET group_id = ? WHERE (group_id IS NULL OR group_id = 0) AND deleted = 0")) {
+                    stmt.setLong(1, defaultGroupId);
+                    int updated = stmt.executeUpdate();
+                    if (updated > 0) {
+                        System.out.println("business_type.group_id 回填完成，共更新 " + updated + " 条");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("业务分组迁移失败: " + e.getMessage());
+        }
+    }
+
+    private void ensureBusinessTypeGroupTable(Connection conn) throws SQLException {
+        if (tableExists(conn, "business_type_group")) {
+            return;
+        }
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute("""
+                    CREATE TABLE business_type_group (
+                        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                        name VARCHAR(50) NOT NULL COMMENT '分组名称',
+                        sort_order INT DEFAULT 0 COMMENT '显示排序顺序',
+                        deleted TINYINT(1) DEFAULT 0 COMMENT '软删除标记：1=已删除，0=正常',
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                        UNIQUE KEY uk_group_name (name)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='业务分组表'
+                    """);
+            System.out.println("business_type_group 表添加成功");
+        }
+    }
+
+    private Long ensureDefaultBusinessTypeGroup(Connection conn) throws SQLException {
+        try (PreparedStatement selectStmt = conn.prepareStatement(
+                "SELECT id FROM business_type_group WHERE name = ? AND deleted = 0 LIMIT 1")) {
+            selectStmt.setString(1, "默认分组");
+            try (ResultSet rs = selectStmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getLong(1);
+                }
+            }
+        }
+
+        int nextSort = 0;
+        try (PreparedStatement sortStmt = conn.prepareStatement(
+                "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM business_type_group WHERE deleted = 0");
+             ResultSet rs = sortStmt.executeQuery()) {
+            if (rs.next()) {
+                nextSort = rs.getInt(1);
+            }
+        }
+
+        try (PreparedStatement insertStmt = conn.prepareStatement(
+                "INSERT INTO business_type_group (name, sort_order) VALUES (?, ?)",
+                Statement.RETURN_GENERATED_KEYS)) {
+            insertStmt.setString(1, "默认分组");
+            insertStmt.setInt(2, nextSort);
+            insertStmt.executeUpdate();
+            try (ResultSet keys = insertStmt.getGeneratedKeys()) {
+                if (keys.next()) {
+                    Long groupId = keys.getLong(1);
+                    System.out.println("默认业务分组创建成功，ID=" + groupId);
+                    return groupId;
+                }
+            }
+        }
+        return null;
     }
 
     private void migrateProtectedPhoneColumns(Connection conn) {

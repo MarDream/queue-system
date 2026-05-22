@@ -4,8 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.queue.common.BusinessException;
 import com.queue.dto.RegionBusinessDTO;
 import com.queue.entity.BusinessType;
+import com.queue.entity.BusinessTypeGroup;
 import com.queue.entity.Region;
 import com.queue.entity.RegionBusiness;
+import com.queue.mapper.BusinessTypeGroupMapper;
 import com.queue.mapper.BusinessTypeMapper;
 import com.queue.mapper.RegionBusinessMapper;
 import com.queue.mapper.RegionMapper;
@@ -15,7 +17,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -25,6 +30,7 @@ public class RegionBusinessServiceImpl implements RegionBusinessService {
 
     private final RegionBusinessMapper regionBusinessMapper;
     private final BusinessTypeMapper businessTypeMapper;
+    private final BusinessTypeGroupMapper businessTypeGroupMapper;
     private final RegionMapper regionMapper;
 
     @Override
@@ -37,7 +43,8 @@ public class RegionBusinessServiceImpl implements RegionBusinessService {
         if (rbList.isEmpty()) return new ArrayList<>();
 
         List<Long> btIds = rbList.stream().map(RegionBusiness::getBusinessTypeId).collect(Collectors.toList());
-        return businessTypeMapper.selectBatchIds(btIds);
+        List<BusinessType> businessTypes = businessTypeMapper.selectBatchIds(btIds);
+        return enrichAndSortBusinessTypes(businessTypes, rbList);
     }
 
     @Override
@@ -51,13 +58,12 @@ public class RegionBusinessServiceImpl implements RegionBusinessService {
         if (rbList.isEmpty()) return new ArrayList<>();
 
         List<Long> btIds = rbList.stream().map(RegionBusiness::getBusinessTypeId).collect(Collectors.toList());
-        // 同时要求全局启用
-        return businessTypeMapper.selectList(
+        List<BusinessType> businessTypes = businessTypeMapper.selectList(
                 new LambdaQueryWrapper<BusinessType>()
                         .in(BusinessType::getId, btIds)
                         .eq(BusinessType::getIsEnabled, true)
-                        .orderByAsc(BusinessType::getSortOrder)
         );
+        return enrichAndSortBusinessTypes(businessTypes, rbList);
     }
 
     @Override
@@ -79,10 +85,11 @@ public class RegionBusinessServiceImpl implements RegionBusinessService {
                         .eq(BusinessType::getDeleted, 0)
                         .orderByAsc(BusinessType::getSortOrder)
         );
-        return allEnabled.stream()
+        List<BusinessType> result = allEnabled.stream()
                 .filter(bt -> !linkedIds.contains(bt.getId()))
                 .filter(bt -> parentScopeIds == null || parentScopeIds.contains(bt.getId()))
                 .collect(Collectors.toList());
+        return enrichAndSortBusinessTypes(result, null);
     }
 
     /**
@@ -211,5 +218,48 @@ public class RegionBusinessServiceImpl implements RegionBusinessService {
                         .eq(RegionBusiness::getRegionId, regionId)
                         .orderByAsc(RegionBusiness::getSortOrder)
         );
+    }
+
+    private List<BusinessType> enrichAndSortBusinessTypes(List<BusinessType> businessTypes, List<RegionBusiness> rbList) {
+        if (businessTypes == null || businessTypes.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        Map<Long, Integer> regionSortMap = new HashMap<>();
+        if (rbList != null) {
+            for (RegionBusiness item : rbList) {
+                regionSortMap.put(item.getBusinessTypeId(), item.getSortOrder() != null ? item.getSortOrder() : Integer.MAX_VALUE);
+            }
+        }
+
+        Map<Long, BusinessTypeGroup> groupMap = businessTypeGroupMapper.selectList(
+                new LambdaQueryWrapper<BusinessTypeGroup>()
+                        .eq(BusinessTypeGroup::getDeleted, 0)
+                        .orderByAsc(BusinessTypeGroup::getSortOrder)
+        ).stream().collect(Collectors.toMap(BusinessTypeGroup::getId, item -> item));
+
+        for (BusinessType businessType : businessTypes) {
+            BusinessTypeGroup group = businessType.getGroupId() != null ? groupMap.get(businessType.getGroupId()) : null;
+            businessType.setGroupName(group != null ? group.getName() : null);
+        }
+
+        businessTypes.sort(
+                Comparator
+                        .comparing((BusinessType item) -> regionSortMap.isEmpty()
+                                ? resolveGroupSortOrder(groupMap, item.getGroupId())
+                                : regionSortMap.getOrDefault(item.getId(), Integer.MAX_VALUE))
+                        .thenComparing(item -> resolveGroupSortOrder(groupMap, item.getGroupId()))
+                        .thenComparing(item -> item.getSortOrder() != null ? item.getSortOrder() : Integer.MAX_VALUE)
+                        .thenComparing(item -> item.getId() != null ? item.getId() : Long.MAX_VALUE)
+        );
+        return businessTypes;
+    }
+
+    private Integer resolveGroupSortOrder(Map<Long, BusinessTypeGroup> groupMap, Long groupId) {
+        BusinessTypeGroup group = groupId != null ? groupMap.get(groupId) : null;
+        if (group == null || group.getSortOrder() == null) {
+            return Integer.MAX_VALUE;
+        }
+        return group.getSortOrder();
     }
 }

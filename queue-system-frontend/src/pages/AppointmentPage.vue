@@ -195,6 +195,7 @@ import { ArrowLeft } from '@element-plus/icons-vue'
 import axios from 'axios'
 import { getDisplayTicketNo } from '../utils/ticketUtils'
 import { getTicketStatusText, isActiveTicketStatus, normalizeTicketStatus } from '../utils/status'
+import { formatDateTime } from '../utils/dateTime'
 
 const API_BASE = ''
 
@@ -417,17 +418,7 @@ function retry() {
 }
 
 function formatTime(timeStr) {
-  if (!timeStr) return ''
-  // 兼容 LocalDateTime 数组格式 [year, month, day, hour, minute, second] 和 ISO 字符串格式
-  let d
-  if (Array.isArray(timeStr)) {
-    // 注意：JS 的 month 是 0-11，比 LocalDateTime 小 1
-    d = new Date(timeStr[0], timeStr[1] - 1, timeStr[2], timeStr[3], timeStr[4], timeStr[5] || 0)
-  } else {
-    d = new Date(timeStr)
-  }
-  if (isNaN(d.getTime())) return '—'
-  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  return formatDateTime(timeStr, '—')
 }
 
 function onBusinessSelectFocus() {
