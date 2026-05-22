@@ -153,7 +153,7 @@
               <span v-if="recallCount > 0" class="recall-badge">{{ 3 - recallCount }}</span>
             </button>
             <button class="action-btn btn-skip" :disabled="completing" @click="handleSkip">
-              <el-icon><Right /></el-icon> 跳过
+              <el-icon><Right /></el-icon> 过号
             </button>
           </div>
         </div>
@@ -277,7 +277,7 @@ const todayStats = ref([
   { label: '已办结', value: '0' },
   { label: '等待人数', value: '0' },
   { label: '重呼次数', value: '0' },
-  { label: '跳过次数', value: '0' },
+  { label: '过号次数', value: '0' },
 ])
 const loading = ref(false)
 const completing = ref(false)
@@ -569,9 +569,9 @@ async function handleSkip() {
   if (!counterId.value || !serving.value || completing.value) return
   try {
     await ElMessageBox.confirm(
-      '确认跳过该号码？跳过后需客户重新取号。',
+      '确认过号该号码？跳过后需客户重新取号。',
       '跳过确认',
-      { confirmButtonText: '确认跳过', cancelButtonText: '取消', type: 'warning' }
+      { confirmButtonText: '确认过号', cancelButtonText: '取消', type: 'warning' }
     )
   } catch {
     return // 用户取消

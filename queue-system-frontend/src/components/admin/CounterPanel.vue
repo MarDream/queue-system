@@ -238,7 +238,7 @@
           </div>
           <div class="stat-card">
             <span class="stat-value">{{ stats.todaySkippedCount ?? 0 }}</span>
-            <span class="stat-label">今日跳过</span>
+            <span class="stat-label">今日过号</span>
           </div>
           <div class="stat-card">
             <span class="stat-value">{{ stats.avgServiceMinutes ?? 0 }}</span>
