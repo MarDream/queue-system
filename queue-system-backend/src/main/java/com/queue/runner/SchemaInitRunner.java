@@ -230,20 +230,9 @@ public class SchemaInitRunner implements CommandLineRunner {
             ensureBusinessTypeGroupTable(conn);
             ensureColumn(conn, "business_type", "group_id",
                     "ALTER TABLE business_type ADD COLUMN group_id BIGINT NULL COMMENT '所属业务分组ID' AFTER id");
+            ensureBusinessTypeGroupColumnNullable(conn);
             ensureIndex(conn, "business_type", "idx_group_id",
                     "CREATE INDEX idx_group_id ON business_type (group_id)");
-
-            Long defaultGroupId = ensureDefaultBusinessTypeGroup(conn);
-            if (defaultGroupId != null) {
-                try (PreparedStatement stmt = conn.prepareStatement(
-                        "UPDATE business_type SET group_id = ? WHERE (group_id IS NULL OR group_id = 0) AND deleted = 0")) {
-                    stmt.setLong(1, defaultGroupId);
-                    int updated = stmt.executeUpdate();
-                    if (updated > 0) {
-                        System.out.println("business_type.group_id 回填完成，共更新 " + updated + " 条");
-                    }
-                }
-            }
         } catch (Exception e) {
             System.err.println("业务分组迁移失败: " + e.getMessage());
         }
@@ -269,41 +258,22 @@ public class SchemaInitRunner implements CommandLineRunner {
         }
     }
 
-    private Long ensureDefaultBusinessTypeGroup(Connection conn) throws SQLException {
-        try (PreparedStatement selectStmt = conn.prepareStatement(
-                "SELECT id FROM business_type_group WHERE name = ? AND deleted = 0 LIMIT 1")) {
-            selectStmt.setString(1, "默认分组");
-            try (ResultSet rs = selectStmt.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getLong(1);
-                }
+    private void ensureBusinessTypeGroupColumnNullable(Connection conn) throws SQLException {
+        DatabaseMetaData metaData = conn.getMetaData();
+        try (ResultSet columns = metaData.getColumns(null, null, "business_type", "group_id")) {
+            if (!columns.next()) {
+                return;
+            }
+            int nullable = columns.getInt("NULLABLE");
+            if (nullable != DatabaseMetaData.columnNoNulls) {
+                return;
             }
         }
 
-        int nextSort = 0;
-        try (PreparedStatement sortStmt = conn.prepareStatement(
-                "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM business_type_group WHERE deleted = 0");
-             ResultSet rs = sortStmt.executeQuery()) {
-            if (rs.next()) {
-                nextSort = rs.getInt(1);
-            }
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute("ALTER TABLE business_type MODIFY COLUMN group_id BIGINT NULL COMMENT '所属业务分组ID'");
+            System.out.println("business_type.group_id 已调整为可为空");
         }
-
-        try (PreparedStatement insertStmt = conn.prepareStatement(
-                "INSERT INTO business_type_group (name, sort_order) VALUES (?, ?)",
-                Statement.RETURN_GENERATED_KEYS)) {
-            insertStmt.setString(1, "默认分组");
-            insertStmt.setInt(2, nextSort);
-            insertStmt.executeUpdate();
-            try (ResultSet keys = insertStmt.getGeneratedKeys()) {
-                if (keys.next()) {
-                    Long groupId = keys.getLong(1);
-                    System.out.println("默认业务分组创建成功，ID=" + groupId);
-                    return groupId;
-                }
-            }
-        }
-        return null;
     }
 
     private void migrateProtectedPhoneColumns(Connection conn) {

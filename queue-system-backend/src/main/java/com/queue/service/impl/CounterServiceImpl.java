@@ -225,9 +225,7 @@ public class CounterServiceImpl implements CounterService {
             ticket.setSkipType(SkipType.MANUAL.getValue()); // 人工跳过
             ticketMapper.updateById(ticket);
 
-            counter.setStatus(CounterStatus.IDLE.getValue());
-            counter.setCurrentTicketId(null);
-            counterMapper.updateById(counter);
+            counterMapper.clearCurrentTicket(counterId, CounterStatus.IDLE.getValue());
         } finally {
             queueService.releaseLock(lockKey);
         }
@@ -293,9 +291,7 @@ public class CounterServiceImpl implements CounterService {
             }
             ticketMapper.updateById(ticket);
 
-            counter.setStatus(CounterStatus.IDLE.getValue());
-            counter.setCurrentTicketId(null);
-            counterMapper.updateById(counter);
+            counterMapper.clearCurrentTicket(counterId, CounterStatus.IDLE.getValue());
 
             // 推送办结记录到Redis，供前端拉取历史
             try {
@@ -388,15 +384,18 @@ public class CounterServiceImpl implements CounterService {
         if (counter == null) {
             return null;
         }
-        if (!CounterStatus.BUSY.getValue().equals(counter.getStatus())) {
+        if (counter.getCurrentTicketId() == null) {
             return counter;
         }
         if (hasActiveCurrentTicket(counter.getCurrentTicketId())) {
             return counter;
         }
-        counter.setStatus(CounterStatus.IDLE.getValue());
+        String nextStatus = CounterStatus.BUSY.getValue().equals(counter.getStatus())
+                ? CounterStatus.IDLE.getValue()
+                : counter.getStatus();
+        counterMapper.clearCurrentTicket(counter.getId(), nextStatus);
+        counter.setStatus(nextStatus);
         counter.setCurrentTicketId(null);
-        counterMapper.updateById(counter);
         return counter;
     }
 

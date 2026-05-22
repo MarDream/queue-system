@@ -200,10 +200,15 @@
         </div>
         <div ref="historyListRef" class="history-list" @wheel="onHistoryWheel">
           <div v-for="h in pagedHistory" :key="h.id" class="history-row">
-            <span class="mono text-muted" style="font-size:11px">{{ h.time }}</span>
-            <span class="mono text-accent" style="font-size:13px">{{ getDisplayTicketNo(h.number) }}</span>
-            <span style="font-size:12px;color:var(--text-secondary)">{{ h.biz }}</span>
-            <span class="mono" style="font-size:11px;color:var(--text-muted)">{{ h.duration }}min</span>
+            <div class="history-row__main">
+              <span class="history-row__ticket mono text-accent">{{ getDisplayTicketNo(h.number) }}</span>
+              <span class="history-row__biz">{{ h.biz }}</span>
+              <span class="history-row__duration mono">{{ h.duration }}min</span>
+            </div>
+            <div class="history-row__time text-muted">
+              <span class="history-row__time-label">办结时间</span>
+              <span class="history-row__time-value mono">{{ h.time }}</span>
+            </div>
           </div>
         </div>
         <div v-if="historyTotalPages > 1" class="history-pagination">
@@ -990,14 +995,54 @@ async function handleLogout() {
 
 .history-list { padding: var(--sp-2) var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-2); overflow-y: auto; max-height: 320px; }
 .history-row {
-  display: grid;
-  grid-template-columns: 44px 52px 1fr 32px;
-  align-items: center;
-  gap: var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   padding: var(--sp-2) var(--sp-3);
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+}
+
+.history-row__main {
+  display: grid;
+  grid-template-columns: 60px 1fr 44px;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.history-row__ticket {
+  font-size: 13px;
+}
+
+.history-row__biz {
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-width: 0;
+}
+
+.history-row__duration {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.history-row__time {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.history-row__time-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.history-row__time-value {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .header-right { margin-left: auto; display: flex; align-items: center; gap: var(--sp-4); }
@@ -1109,7 +1154,7 @@ async function handleLogout() {
   .serving-card,
   .serving-empty,
   .call-next-btn { max-width: 100%; }
-  .history-row { grid-template-columns: 40px 48px 1fr 28px; }
+  .history-row__main { grid-template-columns: 56px 1fr 40px; }
 }
 
 @media (max-width: 480px) {
@@ -1141,6 +1186,8 @@ async function handleLogout() {
   .sc-number { font-size: clamp(36px, 10vw, 56px); }
   .action-btn { padding: var(--sp-3) var(--sp-2); font-size: var(--text-xs); }
   .call-next-btn { font-size: var(--text-base); padding: var(--sp-3); }
-  .history-row { grid-template-columns: 1fr; gap: var(--sp-1); text-align: center; }
+  .history-row__main { grid-template-columns: 1fr; gap: var(--sp-1); text-align: center; }
+  .history-row__duration { text-align: center; }
+  .history-row__time { flex-direction: column; gap: 2px; }
 }
 </style>

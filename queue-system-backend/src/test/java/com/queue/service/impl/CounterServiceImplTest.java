@@ -76,7 +76,30 @@ class CounterServiceImplTest {
 
         assertNull(counterService.callNext(8L));
 
-        verify(counterMapper).updateById(counter);
+        verify(counterMapper).clearCurrentTicket(8L, "idle");
         verify(queueService).releaseLock("call:8");
+    }
+
+    @Test
+    void callNextResetsStaleIdleCounterBeforeCheckingOperability() {
+        Counter counter = new Counter();
+        counter.setId(9L);
+        counter.setRegionId(3L);
+        counter.setStatus("idle");
+        counter.setCurrentTicketId(102L);
+
+        Ticket completedTicket = new Ticket();
+        completedTicket.setId(102L);
+        completedTicket.setStatus("completed");
+
+        when(queueService.acquireLock("call:9", 5)).thenReturn(true);
+        when(counterMapper.selectById(9L)).thenReturn(counter);
+        when(ticketMapper.selectById(102L)).thenReturn(completedTicket);
+        when(counterBusinessMapper.selectBusinessTypeIdsByCounterId(9L)).thenReturn(Collections.emptyList());
+
+        assertNull(counterService.callNext(9L));
+
+        verify(counterMapper).clearCurrentTicket(9L, "idle");
+        verify(queueService).releaseLock("call:9");
     }
 }

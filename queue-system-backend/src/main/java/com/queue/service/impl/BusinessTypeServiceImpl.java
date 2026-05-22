@@ -255,7 +255,7 @@ public class BusinessTypeServiceImpl implements BusinessTypeService {
 
     private void validateGroupId(Long groupId) {
         if (groupId == null) {
-            throw new BusinessException(ResultCode.INVALID_BUSINESS_TYPE.getCode(), "请选择业务分组");
+            return;
         }
         BusinessTypeGroup group = businessTypeGroupMapper.selectById(groupId);
         if (group == null || Integer.valueOf(1).equals(group.getDeleted())) {
@@ -301,7 +301,11 @@ public class BusinessTypeServiceImpl implements BusinessTypeService {
     }
 
     private void populateGroupName(BusinessType businessType) {
-        if (businessType == null || businessType.getGroupId() == null) {
+        if (businessType == null) {
+            return;
+        }
+        if (businessType.getGroupId() == null) {
+            businessType.setGroupName(null);
             return;
         }
         BusinessTypeGroup group = businessTypeGroupMapper.selectById(businessType.getGroupId());

@@ -6,7 +6,7 @@ export interface ApiResponse<T = any> {
 
 export interface BusinessType {
   id: number
-  groupId?: number
+  groupId?: number | null
   groupName?: string | null
   name: string
   prefix: string
@@ -18,6 +18,7 @@ export interface BusinessTypeGroup {
   id: number
   name: string
   sortOrder?: number
+  businessTypeIds?: number[]
 }
 
 export interface Counter {

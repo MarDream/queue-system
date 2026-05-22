@@ -213,15 +213,18 @@ public class CounterController {
         if (counter == null) {
             return null;
         }
-        if (!CounterStatus.BUSY.getValue().equals(counter.getStatus())) {
+        if (counter.getCurrentTicketId() == null) {
             return counter;
         }
         if (hasActiveCurrentTicket(counter.getCurrentTicketId())) {
             return counter;
         }
-        counter.setStatus(CounterStatus.IDLE.getValue());
+        String nextStatus = CounterStatus.BUSY.getValue().equals(counter.getStatus())
+                ? CounterStatus.IDLE.getValue()
+                : counter.getStatus();
+        counterMapper.clearCurrentTicket(counter.getId(), nextStatus);
+        counter.setStatus(nextStatus);
         counter.setCurrentTicketId(null);
-        counterMapper.updateById(counter);
         return counter;
     }
 

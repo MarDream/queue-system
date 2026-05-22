@@ -9,6 +9,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 @TableName("business_type_group")
@@ -18,6 +19,9 @@ public class BusinessTypeGroup {
 
     private String name;            // 分组名称
     private Integer sortOrder;      // 分组排序
+
+    @TableField(exist = false)
+    private List<Long> businessTypeIds;   // 纳入分组的业务类型ID
 
     @TableLogic
     private Integer deleted;        // 软删除

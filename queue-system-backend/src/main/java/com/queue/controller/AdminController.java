@@ -193,9 +193,9 @@ public class AdminController {
                     }
                 }
                 if (needReset) {
+                    counterMapper.clearCurrentTicket(c.getId(), CounterStatus.IDLE.getValue());
                     c.setStatus(CounterStatus.IDLE.getValue());
                     c.setCurrentTicketId(null);
-                    counterMapper.updateById(c);
                 }
             }
             CounterDTO dto = new CounterDTO();

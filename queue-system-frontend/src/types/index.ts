@@ -1,7 +1,7 @@
 // 业务类型（全局定义）
 export interface BusinessType {
   id: number
-  groupId: number
+  groupId?: number | null
   groupName?: string | null
   name: string
   prefix: string
@@ -19,6 +19,7 @@ export interface BusinessTypeGroup {
   id: number
   name: string
   sortOrder: number
+  businessTypeIds?: number[]
   deleted?: number
   createdAt?: string[]
   updatedAt?: string[]

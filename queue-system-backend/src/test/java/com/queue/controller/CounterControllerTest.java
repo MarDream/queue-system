@@ -189,6 +189,6 @@ class CounterControllerTest {
 
         assertEquals(200, result.getCode());
         assertEquals("idle", result.getData().getCurrentStatus());
-        verify(counterMapper).updateById(counter);
+        verify(counterMapper).clearCurrentTicket(8L, "idle");
     }
 }

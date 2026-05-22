@@ -1,6 +1,7 @@
 package com.queue.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.queue.common.BusinessException;
 import com.queue.entity.BusinessType;
 import com.queue.entity.BusinessTypeGroup;
@@ -8,8 +9,12 @@ import com.queue.mapper.BusinessTypeGroupMapper;
 import com.queue.mapper.BusinessTypeMapper;
 import com.queue.service.BusinessTypeGroupService;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class BusinessTypeGroupServiceImpl implements BusinessTypeGroupService {
@@ -33,6 +38,7 @@ public class BusinessTypeGroupServiceImpl implements BusinessTypeGroupService {
     }
 
     @Override
+    @Transactional
     public BusinessTypeGroup create(BusinessTypeGroup group) {
         String name = normalizeName(group.getName());
         ensureNameUnique(name, null);
@@ -41,10 +47,12 @@ public class BusinessTypeGroupServiceImpl implements BusinessTypeGroupService {
             group.setSortOrder(nextSortOrder());
         }
         businessTypeGroupMapper.insert(group);
+        syncGroupMembers(group.getId(), group.getBusinessTypeIds());
         return group;
     }
 
     @Override
+    @Transactional
     public BusinessTypeGroup update(BusinessTypeGroup group) {
         BusinessTypeGroup existing = businessTypeGroupMapper.selectById(group.getId());
         if (existing == null || Integer.valueOf(1).equals(existing.getDeleted())) {
@@ -55,6 +63,7 @@ public class BusinessTypeGroupServiceImpl implements BusinessTypeGroupService {
         existing.setName(name);
         existing.setSortOrder(group.getSortOrder() != null ? group.getSortOrder() : existing.getSortOrder());
         businessTypeGroupMapper.updateById(existing);
+        syncGroupMembers(existing.getId(), group.getBusinessTypeIds());
         return existing;
     }
 
@@ -108,5 +117,64 @@ public class BusinessTypeGroupServiceImpl implements BusinessTypeGroupService {
                         .last("LIMIT 1")
         );
         return last == null || last.getSortOrder() == null ? 0 : last.getSortOrder() + 1;
+    }
+
+    private void syncGroupMembers(Long groupId, List<Long> businessTypeIds) {
+        Set<Long> targetIdSet = normalizeBusinessTypeIds(businessTypeIds);
+
+        List<BusinessType> currentMembers = businessTypeMapper.selectList(
+                new QueryWrapper<BusinessType>()
+                        .eq("group_id", groupId)
+                        .eq("deleted", 0)
+        );
+        Set<Long> currentIdSet = currentMembers.stream()
+                .map(BusinessType::getId)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        if (!targetIdSet.isEmpty()) {
+            List<BusinessType> selectedBusinessTypes = businessTypeMapper.selectBatchIds(targetIdSet);
+            if (selectedBusinessTypes.size() != targetIdSet.size()) {
+                throw new BusinessException(50001, "部分业务类型不存在，无法纳入分组");
+            }
+
+            for (BusinessType businessType : selectedBusinessTypes) {
+                if (Integer.valueOf(1).equals(businessType.getDeleted())) {
+                    throw new BusinessException(50001, "包含已删除的业务类型，无法纳入分组");
+                }
+                Long currentGroupId = businessType.getGroupId();
+                if (currentGroupId != null && !currentGroupId.equals(groupId)) {
+                    throw new BusinessException(50001, "只能选择未分组业务类型或当前分组内业务");
+                }
+            }
+        }
+
+        Set<Long> removedIds = new LinkedHashSet<>(currentIdSet);
+        removedIds.removeAll(targetIdSet);
+        if (!removedIds.isEmpty()) {
+            businessTypeMapper.update(
+                    null,
+                    new UpdateWrapper<BusinessType>()
+                            .in("id", removedIds)
+                            .set("group_id", null)
+            );
+        }
+
+        if (!targetIdSet.isEmpty()) {
+            businessTypeMapper.update(
+                    null,
+                    new UpdateWrapper<BusinessType>()
+                            .in("id", targetIdSet)
+                            .set("group_id", groupId)
+            );
+        }
+    }
+
+    private Set<Long> normalizeBusinessTypeIds(List<Long> businessTypeIds) {
+        if (businessTypeIds == null || businessTypeIds.isEmpty()) {
+            return new LinkedHashSet<>();
+        }
+        return businessTypeIds.stream()
+                .filter(id -> id != null && id > 0)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 }

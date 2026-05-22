@@ -26,6 +26,11 @@ public interface CounterMapper extends BaseMapper<Counter> {
             "</script>")
     int resetCurrentAssignments(@Param("ticketIds") List<Long> ticketIds);
 
+    @Update("UPDATE counter " +
+            "SET status = #{status}, current_ticket_id = NULL, updated_at = NOW(), version = version + 1 " +
+            "WHERE id = #{counterId}")
+    int clearCurrentTicket(@Param("counterId") Long counterId, @Param("status") String status);
+
     /**
      * 物理删除指定区域的所有窗口
      */

@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS `business_type_group` (
 -- 业务类型表（全局定义，不绑定区域）
 CREATE TABLE IF NOT EXISTS `business_type` (
     `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
-    `group_id` BIGINT NOT NULL COMMENT '所属业务分组ID',
+    `group_id` BIGINT NULL COMMENT '所属业务分组ID',
     `name` VARCHAR(50) NOT NULL COMMENT '业务类型名称',
     `prefix` VARCHAR(5) NOT NULL COMMENT '票号前缀代码',
     `description` VARCHAR(200) COMMENT '业务类型描述',
