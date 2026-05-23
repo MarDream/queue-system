@@ -39,12 +39,30 @@
       v-loading="tableLoading"
       row-key="id"
       :tree-props="{ children: 'children', hasChildren: 'hasChildren' }"
-      :default-expand-all="false"
+      :expand-row-keys="expandedRegionRowKeys"
+      :default-expand-all="true"
       :row-class-name="rowClassName"
       empty-text="暂无数据！"
       style="width:100%"
     >
-      <el-table-column prop="name" label="区域名称" min-width="180" />
+      <el-table-column prop="name" label="区域名称" min-width="180">
+        <template #default="{ row }">
+          <div class="region-tree-node">
+            <span class="region-tree-node__name">{{ row.name }}</span>
+            <button
+              v-if="hasRegionChildren(row)"
+              type="button"
+              class="region-tree-node__toggle"
+              :aria-label="isRegionExpanded(row) ? '折叠区域' : '展开区域'"
+              @click.stop="toggleRegionRow(row)"
+            >
+              <el-icon :class="['region-tree-node__toggle-icon', { 'is-expanded': isRegionExpanded(row) }]">
+                <ArrowRight />
+              </el-icon>
+            </button>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column prop="code" label="区划代码" width="130" />
       <el-table-column prop="parentName" label="所属父级" width="120">
         <template #default="{ row }">
@@ -185,7 +203,7 @@
     </el-dialog>
 
     <!-- 选择业务类型弹窗 -->
-    <el-dialog v-model="selectBusinessVisible" width="700px" class="business-select-dialog" draggable resizable :show-close="false">
+    <el-dialog v-model="selectBusinessVisible" width="min(1180px, 92vw)" class="business-select-dialog" draggable resizable :show-close="false">
       <template #header>
         <div class="dialog-header">
           <span class="dialog-title">选择业务类型</span>
@@ -209,36 +227,68 @@
         />
       </div>
       <el-table
-        :data="filteredAvailableBusinessList"
+        :data="pagedSelectableBusinessRows"
+        row-key="rowKey"
+        :tree-props="{ children: 'children' }"
+        :default-expand-all="true"
+        table-layout="auto"
+        :max-height="420"
         empty-text="暂无数据"
-        @selection-change="handleSelectionChange"
         :row-class-name="tableRowClassName"
-        highlight-current-row
       >
-        <el-table-column type="selection" width="55" />
-        <el-table-column prop="name" label="业务名称" min-width="120">
+        <el-table-column width="60" align="center">
           <template #default="{ row }">
-            <div class="business-name">
+            <el-checkbox
+              :model-value="isSelectableRowChecked(row)"
+              :indeterminate="isSelectableRowIndeterminate(row)"
+              @change="checked => toggleSelectableRow(row, checked)"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column prop="name" label="业务名称" min-width="260">
+          <template #default="{ row }">
+            <div v-if="row.rowType === 'group'" class="business-group-name">
+              <span class="business-group-name__title">{{ row.name }}</span>
+              <el-tag size="small" effect="plain" type="primary">{{ row.businessCount }} 项业务</el-tag>
+            </div>
+            <div v-else class="business-name">
               <el-tag :type="row.isEnabled ? 'success' : 'info'" size="small">{{ row.prefix }}</el-tag>
               <span>{{ row.name }}</span>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="groupName" label="所属分组" width="130" show-overflow-tooltip>
+        <el-table-column prop="groupName" label="所属分组" width="170" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag size="small" effect="plain">{{ row.groupName || '未分组' }}</el-tag>
+            <el-tag size="small" effect="plain">
+              {{ row.rowType === 'group' ? '业务分组' : (row.groupName || '未分组') }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="dailyAppointmentLimit" label="每日限额" width="100" align="center" />
-        <el-table-column label="状态" width="80" align="center">
+        <el-table-column prop="description" label="描述" min-width="360" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag :type="row.isEnabled ? 'success' : 'danger'" size="small">
-              {{ row.isEnabled ? '启用' : '停用' }}
+            <span v-if="row.rowType === 'group'" class="group-summary-text">勾选后将默认关联该分组下全部业务类型</span>
+            <span v-else>{{ row.description || '—' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="dailyAppointmentLimit" label="每日限额" width="120" align="center" />
+        <el-table-column label="状态" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.rowType === 'group' ? 'primary' : (row.isEnabled ? 'success' : 'danger')" size="small">
+              {{ row.rowType === 'group' ? '分组' : (row.isEnabled ? '启用' : '停用') }}
             </el-tag>
           </template>
         </el-table-column>
       </el-table>
+      <div class="select-pagination">
+        <el-pagination
+          v-model:current-page="businessPage"
+          v-model:page-size="businessPageSize"
+          background
+          layout="total, sizes, prev, pager, next"
+          :page-sizes="[10, 20, 30, 50]"
+          :total="selectableBusinessRows.length"
+        />
+      </div>
       <div v-if="selectedBusinessIds.length" class="selected-count">
         已选择 <strong>{{ selectedBusinessIds.length }}</strong> 项
       </div>
@@ -284,9 +334,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick, computed } from 'vue'
+import { ref, onMounted, nextTick, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { DCaret, InfoFilled, Plus, Edit, Delete, Search, Download, Upload } from '@element-plus/icons-vue'
+import { ArrowRight, DCaret, InfoFilled, Plus, Edit, Delete, Search, Download, Upload } from '@element-plus/icons-vue'
 import request from '../../api/index'
 import { regionApi, regionBusinessApi } from '../../api/admin'
 import Sortable from 'sortablejs'
@@ -301,6 +351,7 @@ const allFlatData = ref([]) // 全量扁平数据，用于搜索过滤
 const tableLoading = ref(false)
 const tableRef = ref(null)
 const importUploadRef = ref(null)
+const expandedRegionRowKeys = ref([])
 
 // 搜索
 const filterKeyword = ref('')
@@ -491,7 +542,31 @@ async function handleExport() {
 // 为表格行添加 class，标识 parentId 用于拖拽分组
 function rowClassName({ row }) {
   const pid = row.parentId ?? 'root'
-  return `region-row-pid-${pid}`
+  return `${hasRegionChildren(row) ? 'region-row-expandable ' : ''}region-row-pid-${pid}`
+}
+
+function hasRegionChildren(row) {
+  return Array.isArray(row.children) && row.children.length > 0
+}
+
+function isRegionExpanded(row) {
+  return expandedRegionRowKeys.value.includes(row.id)
+}
+
+function toggleRegionRow(row) {
+  if (!hasRegionChildren(row)) return
+
+  const nextExpanded = !isRegionExpanded(row)
+  const keySet = new Set(expandedRegionRowKeys.value)
+
+  if (nextExpanded) {
+    keySet.add(row.id)
+  } else {
+    keySet.delete(row.id)
+  }
+
+  expandedRegionRowKeys.value = Array.from(keySet)
+  tableRef.value?.toggleRowExpansion?.(row, nextExpanded)
 }
 
 // 拖拽排序 — 全局一个 Sortable，通过 move 回调限制仅同 parentId 可排序
@@ -614,6 +689,8 @@ const regionBusinessList = ref([])
 const availableBusinessList = ref([])
 const selectedBusinessIds = ref([])
 const businessKeyword = ref('')
+const businessPage = ref(1)
+const businessPageSize = ref(10)
 const editingBusiness = ref(null)
 const editingBusinessForm = ref({ dailyAppointmentLimit: 50, isEnabled: true })
 const selectBusinessVisible = ref(false)
@@ -636,6 +713,55 @@ const filteredAvailableBusinessList = computed(() => {
       .filter(Boolean)
       .some(value => String(value).toLowerCase().includes(normalizedKeyword))
   )
+})
+
+const selectableBusinessRows = computed(() => {
+  const rows = []
+  const groupMap = new Map()
+
+  filteredAvailableBusinessList.value.forEach(item => {
+    if (item.groupId != null) {
+      const groupKey = `group-${item.groupId}`
+      let group = groupMap.get(groupKey)
+      if (!group) {
+        group = {
+          rowKey: groupKey,
+          rowType: 'group',
+          groupId: item.groupId,
+          groupName: item.groupName || '未命名分组',
+          name: item.groupName || '未命名分组',
+          description: '',
+          dailyAppointmentLimit: '—',
+          isEnabled: true,
+          businessCount: 0,
+          children: []
+        }
+        groupMap.set(groupKey, group)
+        rows.push(group)
+      }
+      group.children.push({
+        ...item,
+        rowKey: `business-${item.id}`,
+        rowType: 'business'
+      })
+      group.businessCount = group.children.length
+      return
+    }
+
+    rows.push({
+      ...item,
+      rowKey: `business-${item.id}`,
+      rowType: 'business'
+    })
+  })
+
+  return rows
+})
+
+const pagedSelectableBusinessRows = computed(() => {
+  const start = (businessPage.value - 1) * businessPageSize.value
+  const end = start + businessPageSize.value
+  return selectableBusinessRows.value.slice(start, end)
 })
 
 async function openCreate(level, parentId = null, parentLevel = null) {
@@ -762,19 +888,54 @@ async function openSelectBusiness() {
     availableBusinessList.value = await regionBusinessApi.listAvailable(currentRegion.value.id)
     selectedBusinessIds.value = []
     businessKeyword.value = ''
+    businessPage.value = 1
+    businessPageSize.value = 10
     selectBusinessVisible.value = true
   } catch {
     ElMessage.error('加载失败')
   }
 }
 
-function handleSelectionChange(selection) {
-  selectedBusinessIds.value = selection.map(s => s.id)
-}
-
 function tableRowClassName({ row }) {
+  if (row.rowType === 'group') return 'business-group-row'
   return row.isEnabled ? '' : 'disabled-row'
 }
+
+function isSelectableRowChecked(row) {
+  if (row.rowType === 'group') {
+    return row.children.length > 0 && row.children.every(child => selectedBusinessIds.value.includes(child.id))
+  }
+  return selectedBusinessIds.value.includes(row.id)
+}
+
+function isSelectableRowIndeterminate(row) {
+  if (row.rowType !== 'group') return false
+  const selectedCount = row.children.filter(child => selectedBusinessIds.value.includes(child.id)).length
+  return selectedCount > 0 && selectedCount < row.children.length
+}
+
+function toggleSelectableRow(row, checked) {
+  const nextIds = new Set(selectedBusinessIds.value)
+  const targetIds = row.rowType === 'group' ? row.children.map(child => child.id) : [row.id]
+
+  targetIds.forEach(id => {
+    if (checked) nextIds.add(id)
+    else nextIds.delete(id)
+  })
+
+  selectedBusinessIds.value = Array.from(nextIds)
+}
+
+watch([businessKeyword, businessPageSize], () => {
+  businessPage.value = 1
+})
+
+watch(selectableBusinessRows, (rows) => {
+  const maxPage = Math.max(1, Math.ceil(rows.length / businessPageSize.value))
+  if (businessPage.value > maxPage) {
+    businessPage.value = maxPage
+  }
+})
 
 async function linkSelectedBusiness() {
   if (!selectedBusinessIds.value.length) {
@@ -848,6 +1009,18 @@ async function unlinkBusiness() {
 onMounted(() => {
   fetchData()
 })
+
+watch(treeData, (rows) => {
+  const validKeys = new Set(collectRegionExpandKeys(rows))
+  expandedRegionRowKeys.value = expandedRegionRowKeys.value.filter(key => validKeys.has(key))
+})
+
+function collectRegionExpandKeys(nodes) {
+  return (nodes || []).flatMap(node => {
+    const currentKey = hasRegionChildren(node) ? [node.id] : []
+    return [...currentKey, ...collectRegionExpandKeys(node.children || [])]
+  })
+}
 </script>
 
 <style scoped>
@@ -900,6 +1073,47 @@ onMounted(() => {
   color: var(--primary);
 }
 
+.region-tree-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.region-tree-node__name {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.region-tree-node__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #909399;
+  cursor: pointer;
+}
+
+.region-tree-node__toggle:hover {
+  color: #409eff;
+}
+
+.region-tree-node__toggle-icon {
+  font-size: 14px;
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.region-tree-node__toggle-icon.is-expanded {
+  transform: rotate(90deg);
+}
+
+:deep(.region-row-expandable .el-table__expand-icon) {
+  display: none;
+}
+
 /* 弹窗区块标题 */
 .section-title {
   font-size: 15px;
@@ -946,9 +1160,44 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
 }
+
+.business-group-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.business-group-name__title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.group-summary-text {
+  color: var(--text-secondary);
+}
+
 .select-toolbar {
   margin-bottom: 12px;
 }
+
+:deep(.business-select-dialog .el-dialog) {
+  max-width: 92vw;
+}
+
+:deep(.business-select-dialog .el-dialog__body) {
+  overflow-x: auto;
+}
+
+:deep(.business-select-dialog .el-table .cell) {
+  white-space: nowrap;
+}
+
+.select-pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
 .selected-count {
   margin-top: 12px;
   padding: 8px 12px;
@@ -965,9 +1214,20 @@ onMounted(() => {
   background-color: var(--bg-body) !important;
   opacity: 0.7;
 }
+:deep(.business-group-row) {
+  background: var(--bg-raised) !important;
+}
+:deep(.business-group-row > td) {
+  background: var(--bg-raised) !important;
+}
 :deep(.business-select-dialog .el-table) {
+  width: 100%;
   border-radius: 4px;
   overflow: hidden;
+}
+
+:deep(.business-select-dialog .el-table__body-wrapper) {
+  overflow-y: auto;
 }
 
 /* 公告管理区块 */

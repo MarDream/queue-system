@@ -87,17 +87,18 @@
     <div class="table-container">
       <el-table
         :key="tableRenderKey"
+        ref="tableRef"
         :data="pagedUserTreeData"
         v-loading="loading"
         stripe
         row-key="rowKey"
         :tree-props="{ children: 'children' }"
-        :default-expand-all="expandAll"
+        :expand-row-keys="expandedUserRegionRowKeys"
         :row-class-name="rowClassName"
         :max-height="tableMaxHeight"
         empty-text="暂无数据！"
       >
-        <el-table-column prop="username" label="用户名" min-width="220">
+        <el-table-column prop="username" label="用户名" min-width="160">
           <template #default="{ row }">
             <div v-if="row.rowType === REGION_ROW_TYPE" class="region-node">
               <div class="region-node__title">
@@ -105,6 +106,17 @@
                   {{ row.isVirtualRegion ? '⌘' : '◈' }}
                 </span>
                 <span class="region-node__name">{{ row.name }}</span>
+                <button
+                  v-if="hasUserRegionChildren(row)"
+                  type="button"
+                  class="region-node__toggle"
+                  :aria-label="isUserRegionExpanded(row) ? '折叠区域' : '展开区域'"
+                  @click.stop="toggleUserRegionRow(row)"
+                >
+                  <el-icon :class="['region-node__toggle-icon', { 'is-expanded': isUserRegionExpanded(row) }]">
+                    <ArrowRight />
+                  </el-icon>
+                </button>
                 <el-tag
                   size="small"
                   effect="plain"
@@ -120,7 +132,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="name" label="姓名" min-width="130">
+        <el-table-column prop="name" label="姓名" min-width="90">
           <template #default="{ row }">
             <span v-if="row.rowType === REGION_ROW_TYPE" class="region-summary">
               本级 {{ row.directUserCount }} / 累计 {{ row.userCount }}
@@ -128,7 +140,7 @@
             <span v-else class="name-text">{{ row.name || '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="email" label="邮箱" min-width="210" show-overflow-tooltip>
+        <el-table-column prop="email" label="邮箱" min-width="170" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="name-text">{{ row.rowType === USER_ROW_TYPE ? (row.email || '—') : '—' }}</span>
           </template>
@@ -143,7 +155,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="管辖区域" min-width="300" show-overflow-tooltip>
+        <el-table-column label="管辖区域" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">
             <div v-if="row.rowType === USER_ROW_TYPE" class="region-cell">
               <span class="region-text">{{ row.regionPath || '—' }}</span>
@@ -159,7 +171,7 @@
             <span v-else class="cell-dash">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="最后登录" width="190">
+        <el-table-column label="最后登录" width="160">
           <template #default="{ row }">
             <span class="time-text">{{ row.rowType === USER_ROW_TYPE ? formatTime(row.lastLoginAt) : '—' }}</span>
           </template>
@@ -324,7 +336,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { Plus, Download, Upload } from '@element-plus/icons-vue'
+import { ArrowRight, Plus, Download, Upload } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
 import request from '../../api/index'
@@ -360,8 +372,10 @@ const isEdit = ref(false)
 const saving = ref(false)
 const searchKeyword = ref('')
 const filterRegionId = ref(null)
-const expandAll = ref(true)
+const expandAll = ref(false)
 const tableRenderKey = ref(0)
+const tableRef = ref(null)
+const expandedUserRegionRowKeys = ref([])
 const currentPage = ref(1)
 const pageSize = ref(8)
 const tableMaxHeight = ref(560)
@@ -815,12 +829,36 @@ function rerenderTreeTable() {
 
 function expandAllRows() {
   expandAll.value = true
-  rerenderTreeTable()
+  expandedUserRegionRowKeys.value = collectUserRegionExpandKeys(userTreeData.value)
 }
 
 function collapseAllRows() {
   expandAll.value = false
-  rerenderTreeTable()
+  expandedUserRegionRowKeys.value = []
+}
+
+function hasUserRegionChildren(row) {
+  return row.rowType === REGION_ROW_TYPE && Array.isArray(row.children) && row.children.length > 0
+}
+
+function isUserRegionExpanded(row) {
+  return expandedUserRegionRowKeys.value.includes(row.rowKey)
+}
+
+function toggleUserRegionRow(row) {
+  if (!hasUserRegionChildren(row)) return
+
+  const nextExpanded = !isUserRegionExpanded(row)
+  const keySet = new Set(expandedUserRegionRowKeys.value)
+
+  if (nextExpanded) {
+    keySet.add(row.rowKey)
+  } else {
+    keySet.delete(row.rowKey)
+  }
+
+  expandedUserRegionRowKeys.value = Array.from(keySet)
+  tableRef.value?.toggleRowExpansion?.(row, nextExpanded)
 }
 
 function onRoleChange() {
@@ -1133,7 +1171,7 @@ function getRegionPathText(regionId) {
 }
 
 function rowClassName({ row }) {
-  return row.rowType === REGION_ROW_TYPE ? 'user-region-row' : ''
+  return hasUserRegionChildren(row) ? 'user-region-row user-region-row-expandable' : (row.rowType === REGION_ROW_TYPE ? 'user-region-row' : '')
 }
 
 function formatTime(time) {
@@ -1283,9 +1321,21 @@ onMounted(() => {
   fetchRoles()
 })
 
+watch(userTreeData, (rows) => {
+  const validKeys = new Set(collectUserRegionExpandKeys(rows))
+  expandedUserRegionRowKeys.value = expandedUserRegionRowKeys.value.filter(key => validKeys.has(key))
+})
+
 onUnmounted(() => {
   window.removeEventListener('resize', syncTableMaxHeight)
 })
+
+function collectUserRegionExpandKeys(nodes) {
+  return (nodes || []).flatMap(node => {
+    if (!hasUserRegionChildren(node)) return []
+    return [node.rowKey, ...collectUserRegionExpandKeys(node.children || [])]
+  })
+}
 </script>
 
 <style scoped>
@@ -1463,6 +1513,32 @@ onUnmounted(() => {
   line-height: 1.2;
 }
 
+.region-node__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #909399;
+  cursor: pointer;
+}
+
+.region-node__toggle:hover {
+  color: #409eff;
+}
+
+.region-node__toggle-icon {
+  font-size: 14px;
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.region-node__toggle-icon.is-expanded {
+  transform: rotate(90deg);
+}
+
 .region-path,
 .region-summary,
 .cell-dash {
@@ -1533,6 +1609,10 @@ onUnmounted(() => {
 
 :deep(.user-region-row:hover > td.el-table__cell) {
   background: rgba(64, 158, 255, 0.08) !important;
+}
+
+:deep(.user-region-row-expandable .el-table__expand-icon) {
+  display: none;
 }
 
 /* 操作列 - 小螺丝 + 小垃圾桶 */

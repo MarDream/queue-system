@@ -4,7 +4,7 @@
       <div class="group-toolbar__intro">
         <div class="section-title">业务分组</div>
         <div class="section-subtitle">
-          业务类型可先独立新增，后续再从分组中选择未分组业务统一纳管。列表会按类别直接展示，不再使用卡片切换。
+          业务类型可先独立新增，后续再从分组中选择未分组业务统一纳管。列表按分组层级展示，默认折叠。
         </div>
       </div>
 
@@ -46,67 +46,112 @@
     </div>
 
     <el-table
+      :key="tableKey"
       ref="tableRef"
-      :data="displayList"
-      :span-method="tableSpanMethod"
+      :data="treeData"
       v-loading="loading"
-      row-key="id"
+      row-key="rowKey"
+      :tree-props="{ children: 'children' }"
+      :expand-row-keys="expandedGroupRowKeys"
+      :default-expand-all="false"
+      :row-class-name="rowClassName"
       empty-text="暂无数据！"
     >
-      <el-table-column label="拖动" width="60">
-        <template #default>
-          <span class="drag-handle">☰</span>
-        </template>
-      </el-table-column>
-
-      <el-table-column label="类别" min-width="140">
+      <el-table-column label="名称" min-width="200">
         <template #default="{ row }">
-          <div class="group-cell">
-            <span class="group-cell__name">{{ resolveGroupLabel(row) }}</span>
-            <span class="group-cell__meta">{{ getGroupBusinessCount(row.groupId) }} 个业务</span>
+          <div v-if="row.rowType === GROUP_ROW_TYPE" class="group-node">
+            <span class="group-node__name">{{ row.name }}</span>
+            <button
+              type="button"
+              class="group-node__toggle"
+              :aria-label="isGroupExpanded(row) ? '折叠分组' : '展开分组'"
+              @click.stop="toggleGroupRow(row)"
+            >
+              <el-icon :class="['group-node__toggle-icon', { 'is-expanded': isGroupExpanded(row) }]">
+                <ArrowRight />
+              </el-icon>
+            </button>
+            <el-tag size="small" effect="plain" type="info" round>{{ row.childCount }} 个业务</el-tag>
+          </div>
+          <div v-else class="biz-name-cell">
+            <span class="drag-handle" title="拖拽排序">☰</span>
+            <span class="biz-name">{{ row.name }}</span>
           </div>
         </template>
       </el-table-column>
 
-      <el-table-column prop="name" label="名称" min-width="150" />
-
       <el-table-column prop="prefix" label="前缀" width="90">
         <template #default="{ row }">
-          <span class="mono text-accent">{{ row.prefix }}</span>
+          <span v-if="row.rowType === BIZ_ROW_TYPE" class="mono text-accent">{{ row.prefix }}</span>
+          <span v-else class="cell-muted">—</span>
         </template>
       </el-table-column>
 
-      <el-table-column prop="dailyAppointmentLimit" label="每日预约限额" width="120" align="center" />
-      <el-table-column prop="description" label="描述" min-width="220" show-overflow-tooltip />
-      <el-table-column prop="sortOrder" label="排序" width="80" />
+      <el-table-column prop="dailyAppointmentLimit" label="每日预约限额" width="120" align="center">
+        <template #default="{ row }">
+          <span v-if="row.rowType === BIZ_ROW_TYPE">{{ row.dailyAppointmentLimit }}</span>
+          <span v-else class="cell-muted">—</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span v-if="row.rowType === BIZ_ROW_TYPE">{{ row.description || '' }}</span>
+          <span v-else class="cell-muted">—</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="排序" width="80">
+        <template #default="{ row }">
+          <span v-if="row.rowType === BIZ_ROW_TYPE">{{ row.sortOrder }}</span>
+          <span v-else class="cell-muted">—</span>
+        </template>
+      </el-table-column>
 
       <el-table-column label="状态" width="80">
         <template #default="{ row }">
-          <span :class="row.isEnabled ? 'text-success' : 'text-danger'">
-            {{ row.isEnabled ? '启用' : '停用' }}
-          </span>
+          <template v-if="row.rowType === BIZ_ROW_TYPE">
+            <span :class="row.isEnabled ? 'text-success' : 'text-danger'">
+              {{ row.isEnabled ? '启用' : '停用' }}
+            </span>
+          </template>
+          <span v-else class="cell-muted">—</span>
         </template>
       </el-table-column>
 
-      <el-table-column label="操作" width="150" align="center">
+      <el-table-column label="操作" width="160" align="center">
         <template #default="{ row }">
-          <el-tooltip content="编辑业务" placement="top">
-            <el-button size="small" link type="primary" @click="openEdit(row)">
-              <el-icon><Edit /></el-icon>
-            </el-button>
-          </el-tooltip>
+          <template v-if="row.rowType === GROUP_ROW_TYPE">
+            <el-tooltip content="编辑分组" placement="top">
+              <el-button size="small" link type="primary" @click="openGroupDialogById(row.groupId)">
+                <el-icon><Edit /></el-icon>
+              </el-button>
+            </el-tooltip>
+            <el-tooltip content="删除分组" placement="top">
+              <el-button size="small" link type="danger" @click="handleDeleteGroup(row)">
+                <el-icon><Delete /></el-icon>
+              </el-button>
+            </el-tooltip>
+          </template>
+          <template v-else>
+            <el-tooltip content="编辑业务" placement="top">
+              <el-button size="small" link type="primary" @click="openEdit(row)">
+                <el-icon><Edit /></el-icon>
+              </el-button>
+            </el-tooltip>
 
-          <el-tooltip content="编辑分组" placement="top" :disabled="!row.groupId">
-            <el-button size="small" link type="primary" :disabled="!row.groupId" @click="openGroupDialogById(row.groupId)">
-              分组
-            </el-button>
-          </el-tooltip>
+            <el-tooltip content="编辑分组" placement="top" :disabled="!row.groupId">
+              <el-button size="small" link type="primary" :disabled="!row.groupId" @click="openGroupDialogById(row.groupId)">
+                分组
+              </el-button>
+            </el-tooltip>
 
-          <el-tooltip content="删除业务" placement="top">
-            <el-button size="small" link type="danger" @click="handleDelete(row)">
-              <el-icon><Delete /></el-icon>
-            </el-button>
-          </el-tooltip>
+            <el-tooltip content="删除业务" placement="top">
+              <el-button size="small" link type="danger" @click="handleDelete(row)">
+                <el-icon><Delete /></el-icon>
+              </el-button>
+            </el-tooltip>
+          </template>
         </template>
       </el-table-column>
     </el-table>
@@ -276,12 +321,14 @@
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Edit, FolderAdd, Plus } from '@element-plus/icons-vue'
+import { ArrowRight, Delete, Edit, FolderAdd, Plus } from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
 import { businessTypeApi, businessTypeGroupApi } from '../../api/admin'
 
 const ALL_GROUP_KEY = '__all__'
 const UNGROUPED_GROUP_KEY = '__ungrouped__'
+const GROUP_ROW_TYPE = 'group'
+const BIZ_ROW_TYPE = 'biz'
 
 const list = ref([])
 const groups = ref([])
@@ -294,7 +341,9 @@ const groupSaving = ref(false)
 const keyword = ref('')
 const selectedGroupFilter = ref(ALL_GROUP_KEY)
 const tableRef = ref(null)
+const tableKey = ref(0)
 const editingGroup = ref(null)
+const expandedGroupRowKeys = ref([])
 
 const form = ref(createEmptyBusinessForm())
 const groupForm = ref(createEmptyGroupForm())
@@ -345,9 +394,12 @@ const sortedGroups = computed(() => {
 
 const groupFilterOptions = computed(() => {
   const options = [
-    { value: ALL_GROUP_KEY, label: `全部类别（${list.value.length}）` },
-    { value: UNGROUPED_GROUP_KEY, label: `未分组（${ungroupedCount.value}）` }
+    { value: ALL_GROUP_KEY, label: `全部类别（${list.value.length}）` }
   ]
+
+  if (ungroupedCount.value > 0) {
+    options.push({ value: UNGROUPED_GROUP_KEY, label: `未分组（${ungroupedCount.value}）` })
+  }
 
   sortedGroups.value.forEach(group => {
     options.push({
@@ -361,7 +413,7 @@ const groupFilterOptions = computed(() => {
 
 const ungroupedCount = computed(() => list.value.filter(item => !item.groupId).length)
 
-const displayList = computed(() => {
+const filteredList = computed(() => {
   const normalizedKeyword = keyword.value.trim().toLowerCase()
 
   return list.value.filter(item => {
@@ -377,22 +429,64 @@ const displayList = computed(() => {
   })
 })
 
-const rowSpanMap = computed(() => {
-  const spans = new Map()
-  let index = 0
-  while (index < displayList.value.length) {
-    const groupKey = resolveGroupKey(displayList.value[index])
-    let end = index + 1
-    while (end < displayList.value.length && resolveGroupKey(displayList.value[end]) === groupKey) {
-      end += 1
-    }
-    spans.set(index, end - index)
-    for (let cursor = index + 1; cursor < end; cursor += 1) {
-      spans.set(cursor, 0)
-    }
-    index = end
+const treeData = computed(() => {
+  const result = []
+
+  const buildBizNode = (item) => ({
+    ...item,
+    rowKey: `biz-${item.id}`,
+    rowType: BIZ_ROW_TYPE,
+    childCount: 0
+  })
+
+  const filtered = filteredList.value
+  const selectedKey = selectedGroupFilter.value
+
+  // 已筛选到具体分组时，平铺展示该分组下的业务
+  if (selectedKey !== ALL_GROUP_KEY) {
+    return filtered.map(buildBizNode)
   }
-  return spans
+
+  // 全部类别：构建分组树
+  const grouped = new Map()
+  const ungrouped = []
+
+  filtered.forEach(item => {
+    const gid = item.groupId
+    if (gid) {
+      if (!grouped.has(gid)) grouped.set(gid, [])
+      grouped.get(gid).push(item)
+    } else {
+      ungrouped.push(item)
+    }
+  })
+
+  sortedGroups.value.forEach(group => {
+    const children = (grouped.get(group.id) || []).map(buildBizNode)
+    result.push({
+      rowKey: `group-${group.id}`,
+      rowType: GROUP_ROW_TYPE,
+      id: `group-${group.id}`,
+      groupId: group.id,
+      name: group.name,
+      childCount: children.length,
+      children
+    })
+  })
+
+  if (ungrouped.length > 0) {
+    result.push({
+      rowKey: 'group-ungrouped',
+      rowType: GROUP_ROW_TYPE,
+      id: 'group-ungrouped',
+      groupId: null,
+      name: '未分组',
+      childCount: ungrouped.length,
+      children: ungrouped.map(buildBizNode)
+    })
+  }
+
+  return result
 })
 
 const availableGroupBusinessOptions = computed(() => {
@@ -457,16 +551,29 @@ function getGroupBusinessCount(groupId) {
   return list.value.filter(item => item.groupId === groupId).length
 }
 
-function tableSpanMethod({ columnIndex, rowIndex }) {
-  if (columnIndex !== 1) {
-    return { rowspan: 1, colspan: 1 }
+function rowClassName({ row }) {
+  const base = row.rowType === GROUP_ROW_TYPE ? 'biz-group-row' : ''
+  return base
+}
+
+function isGroupExpanded(row) {
+  return expandedGroupRowKeys.value.includes(row.rowKey)
+}
+
+function toggleGroupRow(row) {
+  if (row.rowType !== GROUP_ROW_TYPE) return
+
+  const nextExpanded = !isGroupExpanded(row)
+  const keySet = new Set(expandedGroupRowKeys.value)
+
+  if (nextExpanded) {
+    keySet.add(row.rowKey)
+  } else {
+    keySet.delete(row.rowKey)
   }
 
-  const span = rowSpanMap.value.get(rowIndex) ?? 1
-  if (span === 0) {
-    return { rowspan: 0, colspan: 0 }
-  }
-  return { rowspan: span, colspan: 1 }
+  expandedGroupRowKeys.value = Array.from(keySet)
+  tableRef.value?.toggleRowExpansion?.(row, nextExpanded)
 }
 
 function getFirstChar(text) {
@@ -530,43 +637,241 @@ async function reloadAll() {
   initDragSort()
 }
 
+const dragState = ref({ sourceRowKey: null })
+
 function initDragSort() {
   nextTick(() => {
-    const tbody = tableRef.value?.$el.querySelector('.el-table__body-wrapper tbody')
+    const tableEl = tableRef.value?.$el
+    const tbody = tableEl?.querySelector('.el-table__body-wrapper tbody')
     if (!tbody) return
     if (tbody._sortable) {
       tbody._sortable.destroy()
     }
+
+    // 构建 rowKey -> tr 元素映射
+    const flatData = flattenTreeData()
+    const rowKeyByTr = new Map()
+    const trs = tbody.querySelectorAll('tr')
+    trs.forEach(tr => {
+      const text = (tr.innerText || '').trim()
+      for (const row of flatData) {
+        if (row.rowType === BIZ_ROW_TYPE && text.includes(row.name)) {
+          rowKeyByTr.set(tr, row.rowKey)
+          tr.setAttribute('data-row-key', row.rowKey)
+          break
+        }
+        if (row.rowType === GROUP_ROW_TYPE && text.startsWith(row.name)) {
+          rowKeyByTr.set(tr, row.rowKey)
+          tr.setAttribute('data-row-key', row.rowKey)
+          break
+        }
+      }
+    })
+
+    const getTrRowKey = (tr) => rowKeyByTr.get(tr) || tr?.getAttribute('data-row-key') || null
+
     tbody._sortable = Sortable.create(tbody, {
       handle: '.drag-handle',
       animation: 150,
-      onEnd: async ({ oldIndex, newIndex }) => {
-        if (oldIndex === newIndex) return
+      draggable: 'tr',
+      filter: '.biz-group-row',
+      preventOnFilter: false,
+      onStart: (evt) => {
+        lastHighlightedGroupId = undefined
+        dragState.value.sourceRowKey = getTrRowKey(evt.item)
+      },
+      onMove: (evt) => {
+        clearAllDropHighlights(tbody)
+
         if (selectedGroupFilter.value === ALL_GROUP_KEY) {
-          ElMessage.warning('请先筛选到具体类别后再拖拽排序')
-          await fetchList()
-          return
+          const targetTr = findClosestTr(evt.related)
+          if (targetTr) {
+            const targetRowKey = getTrRowKey(targetTr)
+            if (targetTr.classList.contains('biz-group-row')) {
+              targetTr.classList.add('drop-target-highlight')
+              const groupNode = treeData.value.find(row => row.rowKey === targetRowKey && row.rowType === GROUP_ROW_TYPE)
+              lastHighlightedGroupId = groupNode?.groupId ?? null
+            } else {
+              const bizRow = flattenTreeData().find(row => row.rowKey === targetRowKey && row.rowType === BIZ_ROW_TYPE)
+              if (bizRow) {
+                lastHighlightedGroupId = bizRow.groupId ?? null
+              }
+            }
+          }
         }
-        if (keyword.value.trim()) {
-          ElMessage.warning('搜索状态下不支持拖拽排序，请先清空搜索词')
-          await fetchList()
+        return true
+      },
+      onEnd: async (evt) => {
+        clearAllDropHighlights(tbody)
+
+        const { oldIndex, newIndex } = evt
+
+        if (oldIndex === newIndex) {
+          dragState.value.sourceRowKey = null
           return
         }
 
-        const orderedItems = [...displayList.value]
-        const movedItem = orderedItems.splice(oldIndex, 1)[0]
-        orderedItems.splice(newIndex, 0, movedItem)
-        await updateSortOrder(orderedItems)
+        const sourceRowKey = dragState.value.sourceRowKey
+        dragState.value.sourceRowKey = null
+
+        if (!sourceRowKey) {
+          tableKey.value++
+          nextTick(initDragSort)
+          return
+        }
+
+        // 全部类别视图下：判断是否跨分组移动
+        if (selectedGroupFilter.value === ALL_GROUP_KEY) {
+          const targetGroupId = lastHighlightedGroupId
+          if (targetGroupId === undefined) {
+            tableKey.value++
+            nextTick(initDragSort)
+            return
+          }
+
+          const sourceRow = flattenTreeData().find(row => row.rowKey === sourceRowKey)
+          if (!sourceRow || sourceRow.rowType !== BIZ_ROW_TYPE) {
+            tableKey.value++
+            nextTick(initDragSort)
+            return
+          }
+
+          // 跨分组移动
+          if (sourceRow.groupId !== targetGroupId) {
+            tableKey.value++
+            await nextTick()
+            initDragSort()
+            await moveBizToGroup(sourceRow, targetGroupId)
+            return
+          }
+          // 同组内排序：继续执行下面的通用排序逻辑
+        }
+
+        if (keyword.value.trim()) {
+          ElMessage.warning('搜索状态下不支持拖拽排序，请先清空搜索词')
+          tableKey.value++
+          nextTick(initDragSort)
+          return
+        }
+
+        const flatDataInner = flattenTreeData()
+        const sourceIdx = flatDataInner.findIndex(row => row.rowKey === sourceRowKey)
+        if (sourceIdx === -1) {
+          tableKey.value++
+          nextTick(initDragSort)
+          return
+        }
+
+        // 同组排序：用数据驱动而非 DOM 索引
+        const sourceRow = flatDataInner[sourceIdx]
+        // 找到同组的所有业务节点
+        const sameGroupBizItems = flatDataInner.filter(
+          row => row.rowType === BIZ_ROW_TYPE && row.groupId === sourceRow.groupId
+        )
+        // 计算 source 在同组列表中的索引
+        const srcGroupIdx = sameGroupBizItems.findIndex(item => item.rowKey === sourceRowKey)
+        if (srcGroupIdx === -1) {
+          tableKey.value++
+          nextTick(initDragSort)
+          return
+        }
+
+        // 用 DOM 中非分组行的位置差来推算目标在同组中的位置
+        const domBizRows = Array.from(tbody.querySelectorAll('tr:not(.biz-group-row)'))
+        const srcDomIdx = domBizRows.findIndex(tr => getTrRowKey(tr) === sourceRowKey)
+        const domDelta = newIndex - oldIndex
+
+        let targetGroupIdx = srcGroupIdx + domDelta
+        targetGroupIdx = Math.max(0, Math.min(targetGroupIdx, sameGroupBizItems.length - 1))
+        if (srcGroupIdx === targetGroupIdx) {
+          tableKey.value++
+          nextTick(initDragSort)
+          return
+        }
+
+        // 执行数组移动
+        const [moved] = sameGroupBizItems.splice(srcGroupIdx, 1)
+        sameGroupBizItems.splice(targetGroupIdx, 0, moved)
+        await updateSortOrder(sameGroupBizItems)
+        tableKey.value++
+        nextTick(initDragSort)
       }
     })
   })
 }
 
-async function updateSortOrder(groupItems) {
+let lastHighlightedGroupId = undefined
+
+function clearAllDropHighlights(tbody) {
+  if (!tbody) return
+  tbody.querySelectorAll('.drop-target-highlight').forEach(el => {
+    el.classList.remove('drop-target-highlight')
+  })
+}
+
+function findGroupRowEl(el) {
+  let current = el
+  while (current && current.tagName !== 'TBODY') {
+    if (current.tagName === 'TR' && current.classList.contains('biz-group-row')) {
+      return current
+    }
+    current = current.parentElement
+  }
+  return null
+}
+
+function getRowKeyFromTr(trEl) {
+  return trEl?.getAttribute('data-row-key') || trEl?.dataset?.rowKey || null
+}
+
+function findClosestTr(el) {
+  let current = el
+  while (current && current.tagName !== 'TR') {
+    current = current.parentElement
+    if (!current || current.tagName === 'TBODY') return null
+  }
+  return current
+}
+
+async function moveBizToGroup(sourceRow, targetGroupId) {
+  const targetGroupName = targetGroupId
+    ? (groups.value.find(g => g.id === targetGroupId)?.name || '未知分组')
+    : '未分组'
+
   try {
-    for (let i = 0; i < groupItems.length; i += 1) {
-      const item = groupItems[i]
-      await businessTypeApi.update(item.id, {
+    await businessTypeApi.update(sourceRow.id, {
+      name: sourceRow.name,
+      prefix: sourceRow.prefix,
+      description: sourceRow.description || '',
+      dailyAppointmentLimit: sourceRow.dailyAppointmentLimit ?? 50,
+      sortOrder: sourceRow.sortOrder ?? 0,
+      isEnabled: sourceRow.isEnabled !== false,
+      groupId: targetGroupId
+    })
+    ElMessage.success(`已将「${sourceRow.name}」移至${targetGroupName}`)
+    await reloadAll()
+  } catch (err) {
+    ElMessage.error(err.message || '移动失败')
+  }
+}
+
+function flattenTreeData() {
+  const flat = []
+  for (const row of treeData.value) {
+    flat.push(row)
+    if (row.children) {
+      for (const child of row.children) {
+        flat.push(child)
+      }
+    }
+  }
+  return flat
+}
+
+async function updateSortOrder(bizItems) {
+  try {
+    const updates = bizItems.map((item, i) =>
+      businessTypeApi.update(item.id, {
         name: item.name,
         prefix: item.prefix,
         description: item.description || '',
@@ -574,7 +879,8 @@ async function updateSortOrder(groupItems) {
         sortOrder: i,
         isEnabled: item.isEnabled !== false
       })
-    }
+    )
+    await Promise.all(updates)
     ElMessage.success('排序已更新')
     await fetchList()
   } catch (err) {
@@ -730,12 +1036,13 @@ async function handleSaveGroup() {
   }
 }
 
-async function handleDeleteGroup(group) {
+async function handleDeleteGroup(row) {
+  const groupId = row.groupId
+  const groupName = row.name
   try {
-    await ElMessageBox.confirm(`确认删除分组「${group.name}」吗？`, '删除分组', { type: 'warning' })
-    await businessTypeGroupApi.delete(group.id)
+    await ElMessageBox.confirm(`确认删除分组「${groupName}」吗？删除后其下业务将变为未分组。`, '删除分组', { type: 'warning' })
+    await businessTypeGroupApi.delete(groupId)
     ElMessage.success('分组删除成功')
-    groupDialogVisible.value = false
     await reloadAll()
   } catch (err) {
     if (err !== 'cancel') ElMessage.error(err.message || '分组删除失败')
@@ -744,6 +1051,11 @@ async function handleDeleteGroup(group) {
 
 watch([selectedGroupFilter, keyword], () => {
   initDragSort()
+})
+
+watch(treeData, (rows) => {
+  const validKeys = new Set(rows.filter(row => row.rowType === GROUP_ROW_TYPE).map(row => row.rowKey))
+  expandedGroupRowKeys.value = expandedGroupRowKeys.value.filter(key => validKeys.has(key))
 })
 
 onMounted(() => {
@@ -820,21 +1132,51 @@ onMounted(() => {
   gap: 12px;
 }
 
-.group-cell {
+.group-node {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 8px;
 }
 
-.group-cell__name {
-  font-size: 14px;
+.group-node__name {
   font-weight: 600;
   color: var(--text-primary);
 }
 
-.group-cell__meta {
-  font-size: 12px;
-  color: var(--text-muted);
+.group-node__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #909399;
+  cursor: pointer;
+}
+
+.group-node__toggle:hover {
+  color: #409eff;
+}
+
+.group-node__toggle-icon {
+  font-size: 14px;
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.group-node__toggle-icon.is-expanded {
+  transform: rotate(90deg);
+}
+
+.biz-name-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.biz-name {
+  color: var(--text-primary);
 }
 
 .group-hint {
@@ -885,6 +1227,28 @@ onMounted(() => {
 .text-danger {
   color: #f56c6c;
   font-weight: 500;
+}
+
+.cell-muted {
+  color: var(--text-muted);
+}
+
+:deep(.biz-group-row > td.el-table__cell) {
+  background: rgba(64, 158, 255, 0.04);
+}
+
+:deep(.biz-group-row:hover > td.el-table__cell) {
+  background: rgba(64, 158, 255, 0.07) !important;
+}
+
+:deep(.biz-group-row .el-table__expand-icon) {
+  display: none;
+}
+
+:deep(.biz-group-row.drop-target-highlight > td.el-table__cell) {
+  background: rgba(103, 194, 58, 0.15) !important;
+  outline: 2px dashed #67c23a;
+  outline-offset: -2px;
 }
 
 .drag-handle {

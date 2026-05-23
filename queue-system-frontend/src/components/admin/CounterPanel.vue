@@ -39,6 +39,10 @@
         <el-button @click="refresh" :loading="loading">
           <el-icon><Refresh /></el-icon> 刷新
         </el-button>
+        <el-button-group class="expand-collapse-btns">
+          <el-button @click="expandAllCounterRows">展开全部</el-button>
+          <el-button @click="collapseAllCounterRows">收起层级</el-button>
+        </el-button-group>
         <div class="toolbar-actions">
           <el-button :loading="downloadingTemplate" @click="showImportTemplateNotice">
             <el-icon class="btn-i"><Download /></el-icon> 批量导入模板
@@ -83,15 +87,40 @@
           <div class="kpi-label">暂停</div>
         </button>
       </div>
+
+      <div class="view-summary">
+        <span class="view-summary__mode">按区域层级展示</span>
+        <span class="view-summary__text">当前显示 {{ visibleRegionCount }} 个区域分组，{{ visibleCounterCount }} 个窗口</span>
+        <div class="view-summary__stats">
+          <span class="view-stat">
+            <span class="view-stat__label">总窗口</span>
+            <strong class="view-stat__value">{{ kpi.total }}</strong>
+          </span>
+          <span class="view-stat">
+            <span class="view-stat__label">空闲</span>
+            <strong class="view-stat__value is-success">{{ kpi.idle }}</strong>
+          </span>
+          <span class="view-stat">
+            <span class="view-stat__label">忙碌</span>
+            <strong class="view-stat__value is-warning">{{ kpi.busy }}</strong>
+          </span>
+          <span class="view-stat">
+            <span class="view-stat__label">暂停</span>
+            <strong class="view-stat__value is-muted">{{ kpi.paused }}</strong>
+          </span>
+        </div>
+      </div>
     </div>
 
     <div class="table-wrap">
       <div ref="tableContainerRef" class="table-container" @wheel="onWheelPage">
         <el-table
           ref="tableRef"
-          :data="pagedCounters"
+          :data="pagedCounterTreeData"
           v-loading="loading"
-          row-key="id"
+          row-key="rowKey"
+          :tree-props="{ children: 'children' }"
+          :expand-row-keys="expandedCounterRegionRowKeys"
           highlight-current-row
           table-layout="auto"
           :height="tableHeight"
@@ -102,25 +131,60 @@
           style="width:100%"
         >
           <el-table-column type="selection" width="52" :reserve-selection="true" />
-          <el-table-column label="窗口" min-width="180">
+          <el-table-column label="窗口" min-width="180" class-name="counter-tree-cell">
             <template #default="{ row }">
-              <div class="cell-title">
+              <!-- 区域行 -->
+              <div v-if="row.rowType === REGION_ROW_TYPE" class="region-node">
+                <div class="region-node__title">
+                  <span class="region-node__icon" :class="{ 'is-virtual': row.isVirtualRegion }">
+                    {{ row.isVirtualRegion ? '⌘' : '◈' }}
+                  </span>
+                  <span class="region-node__name">{{ row.name }}</span>
+                  <button
+                    v-if="hasCounterRegionChildren(row)"
+                    type="button"
+                    class="region-node__toggle"
+                    :aria-label="isCounterRegionExpanded(row) ? '折叠区域' : '展开区域'"
+                    @click.stop="toggleCounterRegionRow(row)"
+                  >
+                    <el-icon :class="['region-node__toggle-icon', { 'is-expanded': isCounterRegionExpanded(row) }]">
+                      <ArrowRight />
+                    </el-icon>
+                  </button>
+                  <el-tag
+                    size="small"
+                    effect="plain"
+                    :type="row.isVirtualRegion ? (row.virtualTagType || 'info') : levelTagType(row.level)"
+                  >
+                    {{ row.isVirtualRegion ? row.virtualTagLabel : levelLabel(row.level) }}
+                  </el-tag>
+                </div>
+              </div>
+              <!-- 窗口行 -->
+              <div v-else class="cell-title">
                 <span class="cell-name">{{ row.name }}</span>
                 <el-tag size="small" class="cell-tag">#{{ row.number }}</el-tag>
-              </div>
-              <div class="cell-sub">
-                <span class="cell-muted">{{ regionNameMap[row.regionId] || '—' }}</span>
               </div>
             </template>
           </el-table-column>
           <el-table-column label="状态" width="90" align="center">
             <template #default="{ row }">
-              <StatusBadge :status="row.status" type="counter" />
+              <span v-if="row.rowType === REGION_ROW_TYPE" class="region-summary">
+                本级 {{ row.directCounterCount }} / 累计 {{ row.counterCount }}
+              </span>
+              <StatusBadge v-else :status="row.status" type="counter" />
+            </template>
+          </el-table-column>
+          <el-table-column label="所属区域" min-width="180">
+            <template #default="{ row }">
+              <span v-if="row.rowType === COUNTER_ROW_TYPE" class="cell-muted">{{ row.fullPath || regionNameMap[row.regionId] || '—' }}</span>
+              <span v-else class="cell-muted">{{ row.fullPath || '—' }}</span>
             </template>
           </el-table-column>
           <el-table-column label="业务" min-width="320">
             <template #default="{ row }">
-              <div class="tag-list">
+              <span v-if="row.rowType === REGION_ROW_TYPE" class="cell-dash">—</span>
+              <div v-else class="tag-list">
                 <el-tag v-for="t in displayBusinessTags(row.businessTypes)" :key="t" size="small" type="info">
                   {{ t }}
                 </el-tag>
@@ -130,36 +194,40 @@
           </el-table-column>
           <el-table-column label="操作员" min-width="180">
             <template #default="{ row }">
-              <span v-if="row.operatorNames && row.operatorNames.length">{{ row.operatorNames.join(', ') }}</span>
+              <span v-if="row.rowType === REGION_ROW_TYPE" class="cell-dash">—</span>
+              <span v-else-if="row.operatorNames && row.operatorNames.length">{{ row.operatorNames.join(', ') }}</span>
               <span v-else class="cell-muted">—</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="220" fixed="right" align="center">
             <template #default="{ row }">
-              <el-button size="small" link type="primary" @click.stop="openEdit(row)">
-                <el-icon><Edit /></el-icon> 编辑
-              </el-button>
-              <el-button
-                v-if="row.status !== 'paused'"
-                size="small"
-                link
-                type="warning"
-                @click.stop="updateCounterStatus(row, 'paused')"
-              >
-                暂停
-              </el-button>
-              <el-button
-                v-else
-                size="small"
-                link
-                type="success"
-                @click.stop="updateCounterStatus(row, 'idle')"
-              >
-                恢复
-              </el-button>
-              <el-button size="small" link type="danger" @click.stop="handleDelete(row)">
-                <el-icon><Delete /></el-icon> 删除
-              </el-button>
+              <template v-if="row.rowType === COUNTER_ROW_TYPE">
+                <el-button size="small" link type="primary" @click.stop="openEdit(row)">
+                  <el-icon><Edit /></el-icon> 编辑
+                </el-button>
+                <el-button
+                  v-if="row.status !== 'paused'"
+                  size="small"
+                  link
+                  type="warning"
+                  @click.stop="updateCounterStatus(row, 'paused')"
+                >
+                  暂停
+                </el-button>
+                <el-button
+                  v-else
+                  size="small"
+                  link
+                  type="success"
+                  @click.stop="updateCounterStatus(row, 'idle')"
+                >
+                  恢复
+                </el-button>
+                <el-button size="small" link type="danger" @click.stop="handleDelete(row)">
+                  <el-icon><Delete /></el-icon> 删除
+                </el-button>
+              </template>
+              <span v-else class="cell-dash">—</span>
             </template>
           </el-table-column>
         </el-table>
@@ -373,11 +441,18 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete, Search, RefreshRight, Refresh, Download, Upload } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Search, RefreshRight, Refresh, Download, Upload, ArrowRight } from '@element-plus/icons-vue'
 import { StatusBadge } from './index.js'
 import request from '../../api/index'
 import { counterApi } from '../../api/admin'
 import { getDisplayTicketNo } from '../../utils/ticketUtils'
+
+// 行类型常量
+const REGION_ROW_TYPE = 'region'
+const COUNTER_ROW_TYPE = 'counter'
+const PLATFORM_NODE_KEY = 'platform-counters'
+const DETACHED_NODE_KEY = 'detached-counters'
+const ROOT_REGION_KEY = 'root'
 
 const list = ref([])
 const regions = ref([])
@@ -440,6 +515,9 @@ const filterRegionId = ref(null)
 const filterStatus = ref('')
 const filterKeyword = ref('')
 
+// 区域树形视图展开状态
+const expandedCounterRegionRowKeys = ref([])
+
 const selectedId = ref(null)
 const selectedCounters = ref([])
 const selectedRows = ref([])
@@ -488,6 +566,133 @@ const filteredCounters = computed(() => {
   return result
 })
 
+// 区域快速查找映射
+const regionMap = computed(() => {
+  const map = new Map()
+  regions.value.forEach(r => map.set(r.id, r))
+  return map
+})
+
+// 区域children映射（用于构建树形结构）
+const regionChildrenMap = computed(() => {
+  const map = new Map()
+  regions.value.forEach(r => {
+    const parentKey = r.parentId || ROOT_REGION_KEY
+    if (!map.has(parentKey)) map.set(parentKey, [])
+    map.get(parentKey).push(r)
+  })
+  return map
+})
+
+// 构建窗口树形数据（按区域分组）
+const counterTreeData = computed(() => {
+  const countersByRegion = new Map()
+  const platformCounters = []
+  const detachedCounters = []
+  const matchedCounters = filteredCounters.value.slice()
+
+  matchedCounters.forEach(counter => {
+    const regionId = counter.regionId
+    if (regionId == null) {
+      platformCounters.push(counter)
+      return
+    }
+    if (!regionMap.value.has(regionId)) {
+      detachedCounters.push(counter)
+      return
+    }
+    if (!countersByRegion.has(regionId)) {
+      countersByRegion.set(regionId, [])
+    }
+    countersByRegion.get(regionId).push(counter)
+  })
+
+  const buildCounterNode = (counter) => ({
+    ...counter,
+    rowKey: `counter-${counter.id}`,
+    rowType: COUNTER_ROW_TYPE
+  })
+
+  const buildRegionNode = (region) => {
+    const regionId = region.id
+    if (regionId == null) return null
+
+    const childRegionNodes = (regionChildrenMap.value.get(regionId) || [])
+      .map(buildRegionNode)
+      .filter(Boolean)
+    const directCounters = (countersByRegion.get(regionId) || [])
+      .map(buildCounterNode)
+    const counterCount = directCounters.length + childRegionNodes.reduce((sum, node) => sum + node.counterCount, 0)
+
+    if (counterCount === 0) return null
+
+    return {
+      rowKey: `region-${regionId}`,
+      rowType: REGION_ROW_TYPE,
+      isVirtualRegion: false,
+      virtualTagLabel: '',
+      virtualTagType: '',
+      regionId,
+      name: region.name,
+      level: region.level,
+      fullPath: getRegionPathText(regionId),
+      directCounterCount: directCounters.length,
+      counterCount,
+      children: [...childRegionNodes, ...directCounters]
+    }
+  }
+
+  const buildVirtualNode = (key, name, counters, tagLabel, tagType) => ({
+    rowKey: key,
+    rowType: REGION_ROW_TYPE,
+    isVirtualRegion: true,
+    virtualTagLabel: tagLabel,
+    virtualTagType: tagType,
+    name,
+    level: '',
+    fullPath: name,
+    directCounterCount: counters.length,
+    counterCount: counters.length,
+    children: counters.map(buildCounterNode)
+  })
+
+  const selectedRegionId = filterRegionId.value
+  const rootRegions = selectedRegionId != null
+    ? [regionMap.value.get(selectedRegionId)].filter(Boolean)
+    : (regionChildrenMap.value.get(ROOT_REGION_KEY) || [])
+
+  const tree = rootRegions.map(buildRegionNode).filter(Boolean)
+
+  if (selectedRegionId == null && platformCounters.length > 0) {
+    tree.unshift(buildVirtualNode(PLATFORM_NODE_KEY, '平台级窗口', platformCounters, '平台级', 'danger'))
+  }
+  if (selectedRegionId == null && detachedCounters.length > 0) {
+    tree.push(buildVirtualNode(DETACHED_NODE_KEY, '未匹配区域', detachedCounters, '异常区域', 'warning'))
+  }
+
+  return tree
+})
+
+// 获取区域路径文本
+function getRegionPathText(regionId) {
+  if (!regionId) return ''
+  const region = regionMap.value.get(regionId)
+  if (!region) return ''
+  return region.name || ''
+}
+
+// 统计可见区域数量
+function countRegionNodes(nodes) {
+  return (nodes || []).reduce((sum, node) => {
+    if (node.rowType !== REGION_ROW_TYPE) return sum
+    return sum + 1 + countRegionNodes(node.children || [])
+  }, 0)
+}
+
+const rootGroupTotal = computed(() => counterTreeData.value.length)
+const visibleRegionCount = computed(() => countRegionNodes(counterTreeData.value))
+const visibleCounterCount = computed(() => filteredCounters.value.length)
+
 const currentPage = ref(1)
 const pageSize = ref(10)
 
@@ -495,6 +700,13 @@ const pagedCounters = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
   const end = start + pageSize.value
   return filteredCounters.value.slice(start, end)
+})
+
+// 树形视图分页数据
+const pagedCounterTreeData = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  return counterTreeData.value.slice(start, end)
 })
 
 let wheelAccumulatedDelta = 0
@@ -894,14 +1106,94 @@ async function updateCounterStatus(row, targetStatus) {
   }
 }
 
+// 树形视图辅助函数
+function hasCounterRegionChildren(row) {
+  return Array.isArray(row.children) && row.children.length > 0
+}
+
+function isCounterRegionExpanded(row) {
+  return expandedCounterRegionRowKeys.value.includes(row.rowKey)
+}
+
+function toggleCounterRegionRow(row) {
+  if (!hasCounterRegionChildren(row)) return
+
+  const nextExpanded = !isCounterRegionExpanded(row)
+  const keySet = new Set(expandedCounterRegionRowKeys.value)
+
+  if (nextExpanded) {
+    keySet.add(row.rowKey)
+  } else {
+    keySet.delete(row.rowKey)
+  }
+
+  expandedCounterRegionRowKeys.value = Array.from(keySet)
+  tableRef.value?.toggleRowExpansion?.(row, nextExpanded)
+}
+
+function expandAllCounterRows() {
+  const keys = collectCounterRegionExpandKeys(counterTreeData.value)
+  expandedCounterRegionRowKeys.value = keys
+  // 全部展开
+  if (tableRef.value) {
+    counterTreeData.value.forEach(node => {
+      if (node.rowType === REGION_ROW_TYPE && hasCounterRegionChildren(node)) {
+        tableRef.value.toggleRowExpansion(node, true)
+      }
+    })
+  }
+}
+
+function collapseAllCounterRows() {
+  expandedCounterRegionRowKeys.value = []
+  if (tableRef.value) {
+    counterTreeData.value.forEach(node => {
+      if (node.rowType === REGION_ROW_TYPE && hasCounterRegionChildren(node)) {
+        tableRef.value.toggleRowExpansion(node, false)
+      }
+    })
+  }
+}
+
+function collectCounterRegionExpandKeys(nodes) {
+  const keys = []
+  nodes.forEach(node => {
+    if (node.rowType === REGION_ROW_TYPE && hasCounterRegionChildren(node)) {
+      keys.push(node.rowKey)
+      if (node.children) {
+        keys.push(...collectCounterRegionExpandKeys(node.children))
+      }
+    }
+  })
+  return keys
+}
+
 function rowClassName({ row }) {
+  // 区域行
+  if (row.rowType === REGION_ROW_TYPE) {
+    return hasCounterRegionChildren(row) ? 'counter-region-row counter-region-row-expandable' : 'counter-region-row'
+  }
+  // 窗口行
   if (row.status === 'paused') return 'row-paused'
   if (row.status === 'busy') return 'row-busy'
   return ''
 }
 
+// 区域级别标签类型
+function levelTagType(level) {
+  const map = { city: 'primary', town: 'success', street: 'warning' }
+  return map[level] || 'info'
+}
+
+// 区域级别标签文本
+function levelLabel(level) {
+  const map = { city: '市级', town: '镇/区级', street: '街道级' }
+  return map[level] || level
+}
+
 function onSelectionChange(selection) {
-  selectedRows.value = selection || []
+  // 只处理窗口行的选择，忽略区域行
+  selectedRows.value = (selection || []).filter(r => r.rowType === COUNTER_ROW_TYPE)
   selectedCounters.value = selectedRows.value.map(r => r.id)
 }
 
@@ -917,9 +1209,16 @@ async function syncTableSelection() {
   tableRef.value.clearSelection()
   if (!selectedCounters.value.length) return
   const idSet = new Set(selectedCounters.value)
-  pagedCounters.value.forEach(row => {
-    if (idSet.has(row.id)) tableRef.value.toggleRowSelection(row, true)
-  })
+  // 遍历树形数据找到窗口行
+  function syncRows(nodes) {
+    nodes.forEach(row => {
+      if (row.rowType === COUNTER_ROW_TYPE && idSet.has(row.id)) {
+        tableRef.value.toggleRowSelection(row, true)
+      }
+      if (row.children) syncRows(row.children)
+    })
+  }
+  syncRows(pagedCounterTreeData.value)
 }
 
 function closeDetail() {
@@ -941,6 +1240,8 @@ function handleVisibilityChange() {
 
 function onRowClick(row, column) {
   if (column && column.type === 'selection') return
+  // 区域行不响应点击
+  if (row.rowType === REGION_ROW_TYPE) return
   selectedId.value = row.id
   detailVisible.value = true
   fetchStats(row.id)
@@ -990,12 +1291,26 @@ watch(filterKeyword, () => {
   closeDetail()
 })
 
-watch([currentPage, pageSize, filteredCounters], () => {
-  const total = filteredCounters.value.length
+watch([currentPage, pageSize, counterTreeData], () => {
+  const total = counterTreeData.value.length
   const maxPage = Math.max(1, Math.ceil(total / pageSize.value))
   if (currentPage.value > maxPage) currentPage.value = maxPage
   syncTableSelection()
 })
+
+// 监听 counterTreeData 变化时同步展开状态
+watch(counterTreeData, () => {
+  nextTick(() => {
+    const validKeys = new Set()
+    counterTreeData.value.forEach(node => collectValidKeys(node, validKeys))
+    expandedCounterRegionRowKeys.value = expandedCounterRegionRowKeys.value.filter(key => validKeys.has(key))
+  })
+}, { deep: true })
+
+function collectValidKeys(node, keySet) {
+  if (node.rowKey) keySet.add(node.rowKey)
+  if (node.children) node.children.forEach(child => collectValidKeys(child, keySet))
+}
 </script>
 
 <style scoped>
@@ -1029,10 +1344,13 @@ watch([currentPage, pageSize, filteredCounters], () => {
 }
 
 :deep(.region-select-popper .el-tree-node__content) {
+  display: flex;
+  align-items: center;
   height: 32px;
   padding: 0 12px;
   border-radius: 4px;
   margin: 0 4px;
+  gap: 4px;
   transition: background 0.15s ease;
 }
 
@@ -1040,10 +1358,23 @@ watch([currentPage, pageSize, filteredCounters], () => {
   background: var(--primary-light);
 }
 
+:deep(.region-select-popper .el-tree-node__label) {
+  order: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 :deep(.region-select-popper .el-tree-node__expand-icon) {
+  order: 2;
   width: 16px;
+  min-width: 16px;
+  flex-shrink: 0;
   height: 16px;
-  margin-right: 4px;
+  margin-left: 4px;
+  margin-right: 0;
   color: var(--text-secondary);
   transition: transform 0.2s ease;
 }
@@ -1088,6 +1419,64 @@ watch([currentPage, pageSize, filteredCounters], () => {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+}
+
+.expand-collapse-btns {
+  flex-shrink: 0;
+}
+
+.view-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--sp-4);
+  font-size: var(--text-sm);
+}
+
+.view-summary__mode {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.view-summary__text {
+  color: var(--text-secondary);
+}
+
+.view-summary__stats {
+  display: flex;
+  gap: var(--sp-4);
+  margin-left: auto;
+}
+
+.view-stat {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.view-stat__label {
+  color: var(--text-muted);
+}
+
+.view-stat__value {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.view-stat__value.is-success {
+  color: var(--success);
+}
+
+.view-stat__value.is-warning {
+  color: var(--warning);
+}
+
+.view-stat__value.is-muted {
+  color: var(--text-muted);
 }
 
 .inline-upload {
@@ -1217,6 +1606,10 @@ watch([currentPage, pageSize, filteredCounters], () => {
   font-size: var(--text-xs);
 }
 
+.cell-dash {
+  color: var(--text-muted);
+}
+
 .tag-list {
   display: flex;
   flex-wrap: wrap;
@@ -1226,6 +1619,95 @@ watch([currentPage, pageSize, filteredCounters], () => {
 
 .tag-list :deep(.el-tag) {
   font-size: 12px;
+}
+
+/* 区域节点样式 */
+.region-node {
+  padding: 0;
+}
+
+.region-node__title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 28px;
+}
+
+.region-node__icon {
+  color: var(--primary);
+  font-size: 14px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.region-node__icon.is-virtual {
+  color: var(--danger);
+}
+
+.region-node__name {
+  font-weight: 600;
+  font-size: var(--text-base);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.region-node__toggle {
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  transition: all var(--duration-fast);
+}
+
+.region-node__toggle:hover {
+  background: var(--bg-raised);
+  color: var(--text-primary);
+}
+
+.region-node__toggle-icon {
+  width: 16px;
+  height: 16px;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.region-node__toggle-icon.is-expanded {
+  transform: rotate(90deg);
+}
+
+.region-summary {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+/* 区域行样式 */
+.counter-region-row {
+  background: var(--bg-raised);
+}
+
+.counter-region-row td {
+  background: var(--bg-raised) !important;
+}
+
+.counter-region-row:hover > td {
+  background: var(--bg-raised) !important;
+}
+
+:deep(.counter-region-row .counter-tree-cell .cell) {
+  display: flex;
+  align-items: center;
+}
+
+:deep(.counter-region-row .counter-tree-cell .cell > .el-table__indent),
+:deep(.counter-region-row .counter-tree-cell .cell > .el-table__placeholder),
+:deep(.counter-region-row .counter-tree-cell .cell > .el-table__expand-icon) {
+  display: none !important;
 }
 
 .drawer-header {

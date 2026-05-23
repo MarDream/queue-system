@@ -22,12 +22,30 @@
       v-loading="tableLoading"
       row-key="id"
       :tree-props="{ children: 'children', hasChildren: 'hasChildren' }"
+      :expand-row-keys="expandedMenuRowKeys"
       :default-expand-all="true"
       :row-class-name="rowClassName"
       empty-text="暂无数据！"
       style="width:100%"
     >
-      <el-table-column prop="name" label="菜单名称" min-width="180" />
+      <el-table-column prop="name" label="菜单名称" min-width="180">
+        <template #default="{ row }">
+          <div class="menu-tree-node">
+            <span class="menu-tree-node__name">{{ row.name }}</span>
+            <button
+              v-if="hasMenuChildren(row)"
+              type="button"
+              class="menu-tree-node__toggle"
+              :aria-label="isMenuExpanded(row) ? '折叠菜单' : '展开菜单'"
+              @click.stop="toggleMenuRow(row)"
+            >
+              <el-icon :class="['menu-tree-node__toggle-icon', { 'is-expanded': isMenuExpanded(row) }]">
+                <ArrowRight />
+              </el-icon>
+            </button>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column prop="path" label="路径" min-width="180">
         <template #default="{ row }">
           <span class="path-text">{{ row.path || '—' }}</span>
@@ -173,9 +191,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete, Search, Key } from '@element-plus/icons-vue'
+import { ArrowRight, Plus, Edit, Delete, Search, Key } from '@element-plus/icons-vue'
 import { menuApi, rolePermissionApi } from '../../api/admin'
 import IconPicker from '../../components/IconPicker.vue'
 import Sortable from 'sortablejs'
@@ -185,6 +203,7 @@ const treeData = ref([])
 const allFlatData = ref([])
 const tableLoading = ref(false)
 const tableRef = ref(null)
+const expandedMenuRowKeys = ref([])
 
 // 搜索
 const filterKeyword = ref('')
@@ -260,6 +279,7 @@ function applyFilter() {
   } else {
     treeData.value = buildTree(data)
   }
+  expandedMenuRowKeys.value = collectMenuExpandKeys(treeData.value)
   nextTick(() => initDragSort())
 }
 
@@ -279,7 +299,31 @@ function handleSearch() {
 // 拖拽排序
 function rowClassName({ row }) {
   const pid = row.parentId ?? 'root'
-  return `menu-row-pid-${pid}`
+  return `${hasMenuChildren(row) ? 'menu-row-expandable ' : ''}menu-row-pid-${pid}`
+}
+
+function hasMenuChildren(row) {
+  return Array.isArray(row.children) && row.children.length > 0
+}
+
+function isMenuExpanded(row) {
+  return expandedMenuRowKeys.value.includes(row.id)
+}
+
+function toggleMenuRow(row) {
+  if (!hasMenuChildren(row)) return
+
+  const nextExpanded = !isMenuExpanded(row)
+  const keySet = new Set(expandedMenuRowKeys.value)
+
+  if (nextExpanded) {
+    keySet.add(row.id)
+  } else {
+    keySet.delete(row.id)
+  }
+
+  expandedMenuRowKeys.value = Array.from(keySet)
+  tableRef.value?.toggleRowExpansion?.(row, nextExpanded)
 }
 
 function initDragSort() {
@@ -528,6 +572,18 @@ async function handleDelete(row) {
 onMounted(() => {
   fetchData()
 })
+
+watch(treeData, (rows) => {
+  const validKeys = new Set(collectMenuExpandKeys(rows))
+  expandedMenuRowKeys.value = expandedMenuRowKeys.value.filter(key => validKeys.has(key))
+})
+
+function collectMenuExpandKeys(nodes) {
+  return (nodes || []).flatMap(node => {
+    const currentKey = hasMenuChildren(node) ? [node.id] : []
+    return [...currentKey, ...collectMenuExpandKeys(node.children || [])]
+  })
+}
 </script>
 
 <style scoped>
@@ -570,6 +626,47 @@ onMounted(() => {
 }
 .text-muted {
   color: var(--text-muted);
+}
+
+.menu-tree-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.menu-tree-node__name {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.menu-tree-node__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #909399;
+  cursor: pointer;
+}
+
+.menu-tree-node__toggle:hover {
+  color: #409eff;
+}
+
+.menu-tree-node__toggle-icon {
+  font-size: 14px;
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.menu-tree-node__toggle-icon.is-expanded {
+  transform: rotate(90deg);
+}
+
+:deep(.menu-row-expandable .el-table__expand-icon) {
+  display: none;
 }
 
 /* 角色权限样式 */
