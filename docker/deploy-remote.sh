@@ -42,6 +42,48 @@ export APP_VERSION
 FRONTEND_IMAGE="queue-frontend-dist:$APP_VERSION"
 BACKEND_IMAGE="queue-backend:$APP_VERSION"
 
+# 检测 nginx 容器的 html 挂载路径
+detect_nginx_html_mount() {
+  local nginx_container="${NGINX_CONTAINER_NAME:-queue-nginx}"
+  local mount_path=""
+
+  if docker ps --format '{{.Names}}' | grep -q "^${nginx_container}$"; then
+    mount_path=$(docker inspect "$nginx_container" --format '{{range .Mounts}}{{if eq .Destination "/usr/share/nginx/html"}}{{.Source}}{{end}}{{end}}' 2>/dev/null)
+  fi
+
+  echo "$mount_path"
+}
+
+# 验证前端部署是否成功
+verify_frontend_deployment() {
+  local dist_dir="$1"
+  local nginx_container="${NGINX_CONTAINER_NAME:-queue-nginx}"
+
+  echo "[frontend] Verifying deployment..."
+
+  if [ -z "$dist_dir" ]; then
+    echo "[frontend] WARNING: No dist directory to verify"
+    return 1
+  fi
+
+  local host_count=$(ls "$dist_dir/assets" 2>/dev/null | wc -l)
+  local container_count=0
+
+  if docker ps --format '{{.Names}}' | grep -q "^${nginx_container}$"; then
+    container_count=$(docker exec "$nginx_container" ls /usr/share/nginx/html/assets 2>/dev/null | wc -l)
+  fi
+
+  if [ "$host_count" -eq "$container_count" ] && [ "$host_count" -gt 0 ]; then
+    echo "[frontend] Verification PASSED: $host_count files synced to nginx"
+    return 0
+  else
+    echo "[frontend] WARNING: File count mismatch (host=$host_count, container=$container_count)"
+    echo "[frontend] Nginx bind mount may have cache issue, consider recreating container:"
+    echo "    docker rm -f $nginx_container && docker run -d --name $nginx_container ..."
+    return 1
+  fi
+}
+
 # MySQL 字符集初始化函数
 init_mysql_charset() {
   echo "[mysql] Checking and setting UTF-8 character set..."
@@ -118,6 +160,23 @@ deploy_backend() {
 }
 
 deploy_frontend() {
+  # 自动检测nginx容器的html挂载路径
+  local nginx_html_mount=$(detect_nginx_html_mount)
+
+  if [ -n "$nginx_html_mount" ]; then
+    if [ "${FRONTEND_DIST_DIR:-}" != "$nginx_html_mount" ]; then
+      echo "[frontend] WARNING: FRONTEND_DIST_DIR mismatch detected!"
+      echo "[frontend]   .env config: ${FRONTEND_DIST_DIR:-}"
+      echo "[frontend]   nginx mount: $nginx_html_mount"
+      echo "[frontend] Auto-correcting to nginx mount path..."
+      FRONTEND_DIST_DIR="$nginx_html_mount"
+    else
+      echo "[frontend] FRONTEND_DIST_DIR correctly matches nginx mount: $nginx_html_mount"
+    fi
+  else
+    echo "[frontend] nginx container not found or html mount not detected, using .env config"
+  fi
+
   if [ -z "${FRONTEND_DIST_DIR:-}" ]; then
     echo "ERROR: FRONTEND_DIST_DIR is not set in $ENV_FILE"
     exit 1
@@ -148,6 +207,9 @@ deploy_frontend() {
   find "$FRONTEND_DIST_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
   cp -a "$staging_dir"/. "$FRONTEND_DIST_DIR"/
   rm -rf "$staging_dir"
+
+  # 验证部署是否成功
+  verify_frontend_deployment "$FRONTEND_DIST_DIR"
 
   if [ -n "${NGINX_CONTAINER_NAME:-}" ]; then
     echo "[frontend] Reloading nginx container: $NGINX_CONTAINER_NAME"
