@@ -3,6 +3,11 @@
 -- 角色管理模块
 -- =============================================
 
+-- 确保使用 UTF-8 字符集
+SET NAMES utf8mb4;
+SET CHARACTER SET utf8mb4;
+SET collation_connection = 'utf8mb4_unicode_ci';
+
 SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS `sys_role_button`;
 DROP TABLE IF EXISTS `sys_role_menu`;
