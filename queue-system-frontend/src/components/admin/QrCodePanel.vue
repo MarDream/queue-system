@@ -211,6 +211,11 @@
             <span v-if="item.createdAt"> | 创建于 {{ formatDate(item.createdAt) }}</span>
           </p>
           <div class="qr-actions">
+            <el-tooltip content="打印" placement="top">
+              <el-button size="small" link type="primary" @click="printSingleQr(item)">
+                <el-icon><Printer /></el-icon>
+              </el-button>
+            </el-tooltip>
             <el-tooltip content="下载" placement="top">
               <el-button size="small" link type="primary" @click="downloadQr(item)">
                 <el-icon><Download /></el-icon>
@@ -267,7 +272,7 @@
 <script setup>
 import { ref, reactive, onMounted, nextTick, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Download, CopyDocument, Delete, Picture, Grid, Notebook } from '@element-plus/icons-vue'
+import { Download, CopyDocument, Delete, Picture, Grid, Notebook, Printer } from '@element-plus/icons-vue'
 import request from '../../api/index'
 import { useUserStore } from '../../stores/user'
 import QRCode from 'qrcode'
@@ -715,11 +720,19 @@ function fallbackCopyUrl(url) {
   document.body.removeChild(textarea)
 }
 
-function openPrintDialog() {
+async function openPrintDialog() {
   if (printSelected.value.length === 0) {
     ElMessage.warning('请先选择要打印的二维码')
     return
   }
+  await nextTick()
+  printDialogVisible.value = true
+}
+
+async function printSingleQr(item) {
+  // 设置选中项为单个二维码，然后打开打印对话框
+  printSelected.value = [item.id]
+  await nextTick()
   printDialogVisible.value = true
 }
 

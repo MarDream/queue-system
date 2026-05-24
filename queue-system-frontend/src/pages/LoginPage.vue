@@ -218,9 +218,9 @@ async function handleLogin() {
         ElMessage.success('登录成功')
 
         if (userData.role === 'WINDOW_OPERATOR') {
-          router.push('/counter')
+          router.push({ name: 'counter' })
         } else {
-          router.push('/admin')
+          router.push({ name: 'admin' })
         }
       } else {
         ElMessage.error(res.data.message || '登录失败')

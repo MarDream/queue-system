@@ -4,15 +4,16 @@ import { useUserStore } from '../stores/user'
 const routes = [
   { path: '/', redirect: '/login' },
   { path: '/home', redirect: '/admin' },
-  { path: '/login', component: () => import('../pages/LoginPage.vue'), meta: { title: '登录', public: true } },
-  { path: '/register', component: () => import('../pages/RegisterPage.vue'), meta: { title: '注册', public: true } },
-  { path: '/forgot-password', component: () => import('../pages/ForgotPasswordPage.vue'), meta: { title: '找回密码', public: true } },
-  { path: '/reset-password', component: () => import('../pages/ResetPasswordPage.vue'), meta: { title: '重置密码', public: true } },
+  { path: '/login', name: 'login', component: () => import('../pages/LoginPage.vue'), meta: { title: '登录', public: true } },
+  { path: '/register', name: 'register', component: () => import('../pages/RegisterPage.vue'), meta: { title: '注册', public: true } },
+  { path: '/forgot-password', name: 'forgot-password', component: () => import('../pages/ForgotPasswordPage.vue'), meta: { title: '找回密码', public: true } },
+  { path: '/reset-password', name: 'reset-password', component: () => import('../pages/ResetPasswordPage.vue'), meta: { title: '重置密码', public: true } },
   { path: '/kiosk', redirect: '/appointment' },
-  { path: '/appointment', component: () => import('../pages/AppointmentPage.vue'), meta: { title: '扫码取号', public: true } },
-  { path: '/display', component: () => import('../pages/DisplayBoardPage.vue'), meta: { title: '叫号大屏', public: true } },
-  { path: '/counter', component: () => import('../pages/CounterPage.vue'), meta: { title: '窗口工作台' } },
-  { path: '/admin', component: () => import('../pages/AdminPage.vue'), meta: { title: '管理后台' } },
+  { path: '/appointment', name: 'appointment', component: () => import('../pages/AppointmentPage.vue'), meta: { title: '扫码取号', public: true } },
+  { path: '/display', name: 'display', component: () => import('../pages/DisplayBoardPage.vue'), meta: { title: '叫号大屏', public: true } },
+  { path: '/counter', name: 'counter', component: () => import('../pages/CounterPage.vue'), meta: { title: '窗口工作台' } },
+  { path: '/admin', alias: ['/admin/'], name: 'admin', component: () => import('../pages/AdminPage.vue'), meta: { title: '管理后台' } },
+  { path: '/:pathMatch(.*)*', redirect: '/login' },
 ]
 
 const router = createRouter({

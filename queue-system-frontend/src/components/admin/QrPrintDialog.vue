@@ -70,7 +70,7 @@
         <el-button @click="$emit('update:modelValue', false)">取消</el-button>
         <el-button
           type="primary"
-          :disabled="rendering || renderedImages.length === 0"
+          :disabled="isPrintBlocked"
           :loading="rendering"
           @click="handlePrint"
         >
@@ -79,23 +79,14 @@
       </div>
     </template>
 
-    <!-- Hidden canvases for rendering -->
-    <div class="hidden-canvases">
-      <canvas
-        v-for="(item, idx) in items"
-        :key="idx"
-        :ref="el => hiddenCanvasRefs[idx] = el"
-        class="qr-hidden-canvas"
-      />
-    </div>
   </el-dialog>
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { computed, ref, watch } from 'vue'
 import QRCode from 'qrcode'
 import { ElMessage } from 'element-plus'
-import { Download, Printer, Loading } from '@element-plus/icons-vue'
+import { Printer, Loading } from '@element-plus/icons-vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -112,16 +103,21 @@ const renderedImages = ref([])
 const rendering = ref(false)
 const renderedCount = ref(0)
 const totalCount = ref(0)
-const hiddenCanvasRefs = ref([])
+const isPrintBlocked = computed(() => rendering.value || renderedImages.value.length === 0)
 
 // Watch dialog open
 watch(
-  () => props.modelValue,
-  async (visible) => {
-    if (visible && props.items.length > 0) {
+  [() => props.modelValue, () => props.items],
+  async ([visible, items]) => {
+    if (!visible) {
+      renderedImages.value = []
+      return
+    }
+    if (Array.isArray(items) && items.length > 0) {
       await renderAllQrCodes()
     }
-  }
+  },
+  { immediate: true, deep: true }
 )
 
 async function renderAllQrCodes() {
@@ -129,9 +125,6 @@ async function renderAllQrCodes() {
   renderedImages.value = []
   renderedCount.value = 0
   totalCount.value = props.items.length
-  hiddenCanvasRefs.value = []
-
-  await nextTick()
 
   const cfg = props.config
   const qrOptions = {
@@ -148,9 +141,9 @@ async function renderAllQrCodes() {
 
   for (let i = 0; i < props.items.length; i++) {
     const item = props.items[i]
-    const canvas = hiddenCanvasRefs.value[i]
+    const canvas = document.createElement('canvas')
 
-    if (!canvas || !item.url) {
+    if (!item.url) {
       renderedCount.value++
       continue
     }
@@ -272,19 +265,56 @@ function handlePrint() {
 <div class="print-grid">
 ${cellsHtml}
 </div>
-<script>
-  window.onload = function() { window.print(); };
-<\/script>
 </body>
 </html>`
 
-  const printWindow = window.open('', '_blank', 'width=800,height=600')
-  if (!printWindow) {
-    ElMessage.error('浏览器阻止了弹窗，请允许弹出窗口后重试')
-    return
+  const iframe = document.createElement('iframe')
+  iframe.style.position = 'fixed'
+  iframe.style.right = '0'
+  iframe.style.bottom = '0'
+  iframe.style.width = '0'
+  iframe.style.height = '0'
+  iframe.style.border = '0'
+  iframe.setAttribute('aria-hidden', 'true')
+
+  const cleanup = () => {
+    setTimeout(() => {
+      iframe.remove()
+    }, 800)
   }
-  printWindow.document.write(html)
-  printWindow.document.close()
+
+  iframe.onload = () => {
+    const frameWindow = iframe.contentWindow
+    const frameDocument = frameWindow?.document
+    if (!frameWindow || !frameDocument) {
+      ElMessage.error('打印失败：无法创建打印上下文')
+      cleanup()
+      return
+    }
+
+    const images = Array.from(frameDocument.images || [])
+    Promise.all(images.map((img) => {
+      if (img.complete) return Promise.resolve()
+      return new Promise((resolve) => {
+        img.onload = () => resolve()
+        img.onerror = () => resolve()
+      })
+    })).finally(() => {
+      setTimeout(() => {
+        try {
+          frameWindow.focus()
+          frameWindow.print()
+        } catch (e) {
+          ElMessage.error('打印失败：' + e.message)
+        } finally {
+          cleanup()
+        }
+      }, 120)
+    })
+  }
+
+  iframe.srcdoc = html
+  document.body.appendChild(iframe)
 }
 </script>
 
@@ -363,16 +393,5 @@ ${cellsHtml}
   display: flex;
   justify-content: flex-end;
   gap: var(--sp-3);
-}
-
-.hidden-canvases {
-  position: absolute;
-  left: -9999px;
-  top: -9999px;
-  visibility: hidden;
-}
-.qr-hidden-canvas {
-  width: 258px;
-  height: 258px;
 }
 </style>
