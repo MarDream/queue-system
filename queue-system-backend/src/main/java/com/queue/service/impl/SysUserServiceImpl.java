@@ -215,9 +215,43 @@ public class SysUserServiceImpl implements SysUserService {
     }
 
     /**
+     * 获取指定用户可管理的区域ID列表
+     * 支持两种模式：
+     * 1. 如果用户配置了自定义区域范围（sys_user_region_scope），则使用该范围
+     * 2. 否则使用用户所属区域的所有子区域
+     */
+    @Override
+    public List<Long> getAllowedRegionIds(Long userId) {
+        if (userId == null) {
+            return new ArrayList<>();
+        }
+        SysUser user = sysUserMapper.selectById(userId);
+        if (user == null) {
+            return new ArrayList<>();
+        }
+
+        // 优先使用自定义区域范围
+        List<Long> scopedRoots = sysUserMapper.selectRegionScopeIds(userId);
+        if (scopedRoots != null && !scopedRoots.isEmpty()) {
+            List<Long> result = new ArrayList<>();
+            for (Long regionId : scopedRoots) {
+                if (regionId == null) {
+                    continue;
+                }
+                result.add(regionId);
+                addChildRegionIds(regionId, result);
+            }
+            return result;
+        }
+
+        // 回退到用户所属区域的所有子区域
+        return getAllowedRegionIdsByRegionId(user.getRegionId());
+    }
+
+    /**
      * 获取指定区域及其所有子层级的区域ID列表
      */
-    private List<Long> getAllowedRegionIds(Long regionId) {
+    private List<Long> getAllowedRegionIdsByRegionId(Long regionId) {
         if (regionId == null) {
             return new ArrayList<>();
         }

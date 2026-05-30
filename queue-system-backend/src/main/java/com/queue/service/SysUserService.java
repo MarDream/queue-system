@@ -51,4 +51,7 @@ public interface SysUserService {
     // 批量导入
     byte[] generateImportTemplate();
     UserImportResult importUsers(MultipartFile file, SysUser currentUser);
+
+    // 获取用户可管理的区域ID列表（包含自定义区域范围和用户所属区域的所有子区域）
+    List<Long> getAllowedRegionIds(Long userId);
 }

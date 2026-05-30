@@ -51,9 +51,19 @@ public class SysUserController {
         if ("SUPER_ADMIN".equals(dto.getRole())) {
             return Result.error(400, "不允许创建超级管理员账号");
         }
+        // 区域管理员权限校验：只能创建管辖区域内的用户
         if ("REGION_ADMIN".equals(operator.getRole())) {
             if ("REGION_ADMIN".equals(dto.getRole())) {
                 return Result.error(400, "区域管理员不允许创建区域管理员账号");
+            }
+            // 校验新用户的区域是否在操作者管辖范围内
+            if (dto.getRegionId() != null) {
+                List<Long> allowedRegionIds = sysUserService.getAllowedRegionIds(operator.getId());
+                if (allowedRegionIds == null || !allowedRegionIds.contains(dto.getRegionId())) {
+                    return Result.error(403, "无权限为该区域创建用户，您只能为所管辖区域创建用户");
+                }
+            } else {
+                return Result.error(400, "请选择管辖区域");
             }
         }
         if (dto.getStatus() == null || dto.getStatus() == 0) {
