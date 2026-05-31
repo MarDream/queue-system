@@ -535,7 +535,10 @@ const regionChildrenMap = computed(() => {
     .slice()
     .sort(compareRegionOrder)
     .forEach(region => {
-      const parentKey = normalizeRegionId(region.parentId) ?? ROOT_REGION_KEY
+      const parentId = normalizeRegionId(region.parentId)
+      const parentKey = parentId == null || !regionMap.value.has(parentId)
+        ? ROOT_REGION_KEY
+        : parentId
       if (!map.has(parentKey)) {
         map.set(parentKey, [])
       }
@@ -547,7 +550,8 @@ const regionChildrenMap = computed(() => {
 function normalizeRegionId(value) {
   if (value === null || value === undefined || value === '') return null
   const regionId = Number(value)
-  return Number.isFinite(regionId) ? regionId : null
+  if (!Number.isFinite(regionId) || regionId <= 0) return null
+  return regionId
 }
 
 function compareRegionOrder(a, b) {
@@ -794,6 +798,10 @@ const superAdminCount = computed(() => list.value.filter(u => u.role === 'SUPER_
 async function fetchList() {
   loading.value = true
   try {
+    // 确保区域数据已加载，避免数据竞争导致 userTreeData 为空
+    if (regions.value.length === 0) {
+      await fetchRegions()
+    }
     list.value = await request.get('/admin/users')
   } catch {
     list.value = []
@@ -1313,11 +1321,12 @@ function showImportResult(result) {
   )
 }
 
-onMounted(() => {
+onMounted(async () => {
   syncTableMaxHeight()
   window.addEventListener('resize', syncTableMaxHeight)
-  fetchList()
-  fetchRegions()
+  // 先加载区域数据，再加载用户列表
+  await fetchRegions()
+  await fetchList()
   fetchRoles()
 })
 

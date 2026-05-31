@@ -155,15 +155,15 @@
         </div>
 
         <div class="panel-host">
-          <DashboardPanel v-if="activeKey === 'dashboard'" />
-          <RegionPanel v-if="activeKey === 'region'" />
-          <BusinessTypePanel v-if="activeKey === 'biz'" />
-          <CounterPanel v-if="activeKey === 'counters'" />
-          <QrCodePanel v-if="activeKey === 'qrcode'" />
-          <UserPanel v-if="activeKey === 'users'" :initial-tab="userSubTab" />
-          <MenuPanel v-if="activeKey === 'menu'" @reload="loadMenus" />
-          <StatisticsPanel v-if="activeKey === 'statistics'" />
-          <AiQueryPanel v-if="activeKey === 'ai'" />
+          <DashboardPanel v-if="activeKey === 'dashboard'" :key="panelRenderKeys.dashboard" />
+          <RegionPanel v-if="activeKey === 'region'" :key="panelRenderKeys.region" />
+          <BusinessTypePanel v-if="activeKey === 'biz'" :key="panelRenderKeys.biz" />
+          <CounterPanel v-if="activeKey === 'counters'" :key="panelRenderKeys.counters" />
+          <QrCodePanel v-if="activeKey === 'qrcode'" :key="panelRenderKeys.qrcode" />
+          <UserPanel v-if="activeKey === 'users'" :key="panelRenderKeys.users" :initial-tab="userSubTab" />
+          <MenuPanel v-if="activeKey === 'menu'" :key="panelRenderKeys.menu" @reload="loadMenus" />
+          <StatisticsPanel v-if="activeKey === 'statistics'" :key="panelRenderKeys.statistics" />
+          <AiQueryPanel v-if="activeKey === 'ai'" :key="panelRenderKeys.ai" />
         </div>
 
         <el-dialog v-model="regionPickerVisible" width="520px" draggable :show-close="false">
@@ -254,6 +254,17 @@ const userStore = useUserStore()
 
 const activeKey = ref('dashboard')
 const userSubTab = ref('users')
+const panelRenderKeys = ref({
+  dashboard: 0,
+  region: 0,
+  biz: 0,
+  counters: 0,
+  qrcode: 0,
+  users: 0,
+  menu: 0,
+  statistics: 0,
+  ai: 0
+})
 const isNarrow = ref(false)
 const isMobile = ref(false)
 const sidebarCollapsed = ref(false)
@@ -450,6 +461,20 @@ function isEmoji(str) {
   return /[^\u0000-\u007F]/.test(str)
 }
 
+function refreshActivePanel(panelKey = activeKey.value) {
+  if (!panelKey || !(panelKey in panelRenderKeys.value)) return
+  panelRenderKeys.value[panelKey] += 1
+}
+
+function syncAdminRoute(panelKey, nextUserTab = userSubTab.value) {
+  const tab = panelKey === 'users'
+    ? (nextUserTab === 'roles' ? 'roles' : 'users')
+    : (panelKey === 'dashboard' ? '' : panelKey)
+
+  const query = tab ? { tab } : {}
+  router.replace({ path: '/admin', query }).catch(() => {})
+}
+
 function handleMenuClick(item) {
   // 分组项点击仅展开/收起
   if (item.type === 'group') {
@@ -465,6 +490,8 @@ function handleMenuClick(item) {
       newSet.add(item.id)
     }
     expandedIds.value = newSet
+    // 持久化展开状态
+    localStorage.setItem('menuExpandedIds', JSON.stringify([...newSet]))
   }
   // 独立页面菜单项 → 新标签页打开
   const routeKeys = { home: '/home', appointment: '/appointment', counter: '/counter', display: '/display' }
@@ -490,10 +517,24 @@ function handleMenuClick(item) {
   }
   // 管理后台内部面板切换
   if (item.key) {
+    const nextUserTab = item.key === 'users'
+      ? (item.path === '/admin?tab=roles' ? 'roles' : 'users')
+      : userSubTab.value
+
+    const isSamePanel = activeKey.value === item.key
+    const isSameUserTab = item.key !== 'users' || userSubTab.value === nextUserTab
+
+    if (isSamePanel && isSameUserTab) {
+      syncAdminRoute(item.key, nextUserTab)
+      refreshActivePanel(item.key)
+      return
+    }
+
     if (item.key === 'users') {
-      userSubTab.value = item.path === '/admin?tab=roles' ? 'roles' : 'users'
+      userSubTab.value = nextUserTab
     }
     activeKey.value = item.key
+    syncAdminRoute(item.key, nextUserTab)
   }
 }
 
@@ -505,6 +546,8 @@ function toggleGroup(groupId) {
     newSet.add(groupId)
   }
   expandedIds.value = newSet
+  // 持久化展开状态
+  localStorage.setItem('menuExpandedIds', JSON.stringify([...newSet]))
 }
 
 function handleLogout() {
@@ -941,7 +984,7 @@ async function loadMenus() {
       name: normalizeMenuName(item.path, item.name),
       icon: normalizeMenuIcon(item.icon)
       }))
-    // 默认展开所有分组
+    // 默认展开所有分组（仅对新加载的分组添加，不覆盖已有状态）
     const newExpanded = new Set(expandedIds.value)
     for (const m of menuList.value) {
       if (m.type === 'group') {
@@ -963,7 +1006,7 @@ async function loadMenus() {
   initSortable()
 }
 
-onMounted(() => {
+onMounted(async () => {
   const params = new URLSearchParams(window.location.search)
   const tab = params.get('tab')
   if (tab === 'roles') {
@@ -974,9 +1017,20 @@ onMounted(() => {
     userSubTab.value = 'users'
   }
 
+  // 从 localStorage 恢复展开状态
+  try {
+    const saved = localStorage.getItem('menuExpandedIds')
+    if (saved) {
+      const ids = JSON.parse(saved)
+      expandedIds.value = new Set(ids)
+    }
+  } catch {
+    // 忽略解析错误
+  }
+
   checkScreenSize()
   window.addEventListener('resize', checkScreenSize)
-  loadMenus()
+  await loadMenus()
 })
 
 onUnmounted(() => {
